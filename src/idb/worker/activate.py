@@ -7,11 +7,10 @@ NOT fix DLL resolution, so on failure we surface the activation hint rather than
 guessing. Stdlib-only imports here so this stays loadable in any interpreter."""
 
 _HINT = (
-    "idalib (the `idapro` module) is not importable in this interpreter.\n"
-    "Install + activate it into THIS Python, then reinstall idb:\n"
-    '  cd "C:\\Program Files\\IDA Professional 9.3\\idalib\\python"\n'
-    "  python -m pip install .\\idapro-0.0.7-py3-none-any.whl\n"
-    "  python .\\py-activate-idalib.py        # writes %APPDATA%\\Hex-Rays\\IDA Pro\\ida-config.json\n"
+    "idalib (the `idapro` module) failed to import/initialize in this interpreter.\n"
+    "idapro installs from PyPI but needs a local IDA install to load its DLLs:\n"
+    "  python -m pip install idapro\n"
+    '  python "<IDA install dir>\\idalib\\python\\py-activate-idalib.py"   # writes ida-config.json\n'
     "(or set the IDADIR env var to the IDA install dir as a fallback)."
 )
 

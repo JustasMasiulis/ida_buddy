@@ -37,7 +37,7 @@ def _check_module(name):
 def _check_idapro():
     if importlib.util.find_spec("idapro") is None:
         return ("idapro", "MISSING",
-                "install the idapro wheel + run py-activate-idalib.py into this interpreter")
+                "pip install idapro, then run py-activate-idalib.py to activate it")
     code = "import idapro,sys; sys.stdout.write('%d.%d.%d' % idapro.get_library_version())"
     try:
         res = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=90)

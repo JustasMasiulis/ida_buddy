@@ -15,44 +15,16 @@ idb close                 # save + shut the worker down
 
 ## Install
 
-idalib needs **install + activation**, then `idb` installs into that same
-interpreter (the CLI and the worker share `sys.executable`):
+This tool requires IDA Pro to be installed and activated globally.
 
 ```powershell
-cd "C:\Program Files\IDA Professional 9.3\idalib\python"
-python -m pip install .\idapro-0.0.7-py3-none-any.whl   # version-matched idapro
-python .\py-activate-idalib.py                           # writes %APPDATA%\Hex-Rays\IDA Pro\ida-config.json
-python -m pip install -e D:\ida_buddy                    # idb + pyzmq + msgspec
-idb doctor                                               # verify the environment
+# 1. Activate idalib so idapro can locate your IDA install (writes ida-config.json):
+python "C:\Program Files\IDA Professional 9.3\idalib\python\py-activate-idalib.py"
+# 2. Install idb (pulls idapro + pyzmq + msgspec from PyPI):
+python -m pip install -e D:\ida_buddy
+# 3. Verify the environment:
+idb doctor
 ```
-
-`idapro` is intentionally **not** a PyPI dependency of `ida-buddy` — the correct
-build ships with the IDA install, not PyPI. `idb doctor` confirms it imports and
-reports the kernel version.
-
-> The `idb` console script lands in your user Scripts dir (e.g.
-> `%APPDATA%\Python\Python313\Scripts`). If that is not on `PATH`, invoke as
-> `python -m idb ...`.
-
-## Model
-
-- **One database per worker.** Multiple sessions = multiple worker processes.
-- **Every worker is fully writable.** Read and mutate commands are always
-  available; mutating commands create an undo point first (`idb undo` / `idb redo`).
-- **Save policy:** `idb save` persists mid-session; `idb close` saves by default;
-  `idb close --no-save` discards; `idb close --kill` hard-terminates a wedged
-  worker (no save).
-- **Sessions** live in per-user registry files (`%LOCALAPPDATA%\ida-buddy`).
-  Commands resolve a session by `-s <id>`, `--idb <path>`, or — when exactly one
-  worker is healthy — automatically.
-- **Stuck command:** `-t` is a *soft* client timeout. Native IDA/Hex-Rays calls
-  cannot be interrupted; recover a wedged worker with `idb close --kill`.
-
-## Output
-
-Dense windbg-style text. **Data goes to stdout**; banners, errors, and
-`[+more]` truncation notices go to **stderr** (never ingested as data).
-Sequence-style output paginates with `-o/--offset` + `-n/--count`.
 
 ## Commands
 
@@ -91,6 +63,10 @@ Global flags: `-s/--session`, `--idb`, `-o/--offset`, `-n/--count`, `-t/--timeou
 `--total`, `-v/--verbose`. Addresses are hex by default (windbg style); `0n`
 prefixes decimal; a symbol name resolves to its address.
 
+**Data goes to stdout**; banners, errors, and
+`[+more]` truncation notices go to **stderr** (never ingested as data).
+Sequence-style output paginates with `-o/--offset` + `-n/--count`.
+
 ### Exit codes
 
 `0` ok · `1` error (IDA/not-found/bad-address/internal) · `2` usage · `3` no
@@ -99,11 +75,6 @@ session · `4` ambiguous session · `5` not ready · `6` timeout · `7` unauthor
 ## Testing
 
 ```
-python -m pytest tests --ignore=tests/integration   # Tiers 1–3 (no IDA)
-python -m pytest tests/integration                   # Tier 4 (needs idapro + a binary)
+python -m pytest tests --ignore=tests/integration
+python -m pytest tests/integration # runs against a real binary
 ```
-
-Tier 4 opens a real worker against `tests/fixtures/where.exe` (override with
-`IDB_TEST_BINARY=<path>`); it auto-skips when idapro or the binary is absent.
-
-See `plan.md` for the full design.
