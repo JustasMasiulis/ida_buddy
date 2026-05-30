@@ -1,0 +1,534 @@
+"""types read handlers: type, types, struct, member, typeof, frame.
+
+Type writes (declare/settype/setmember/enum) and the Hex-Rays union-arm selector
+(union-select) live here too.
+"""
+
+import ida_bytes
+import ida_frame
+import ida_funcs
+import ida_nalt
+import ida_typeinf as T
+from ida_idaapi import BADADDR
+
+from idb import protocol
+from idb.errors import IdbError
+from idb.worker import idahelp
+from idb.worker.dispatch import handler
+
+_LIST_DEFAULT = 300
+_INT_MAX = 0x7FFFFFFF
+_UINT32_MAX = 0xFFFFFFFF
+
+
+def _kind(tif):
+    if tif.is_union():
+        return "union"
+    if tif.is_struct():
+        return "struct"
+    if tif.is_enum():
+        return "enum"
+    if tif.is_ptr():
+        return "pointer"
+    if tif.is_func():
+        return "function"
+    if tif.is_array():
+        return "array"
+    if tif.is_typeref():
+        return "typedef"
+    return "scalar"
+
+
+def _udt_members(tif):
+    udt = T.udt_type_data_t()
+    if not tif.get_udt_details(udt):
+        return []
+    out = []
+    for m in udt:
+        out.append({
+            "name": m.name,
+            "offset": m.offset // 8,
+            "size": m.type.get_size(),
+            "type": str(m.type),
+            "bitfield": m.is_bitfield(),
+        })
+    return out
+
+
+def _enum_members(tif):
+    ed = T.enum_type_data_t()
+    if not tif.get_enum_details(ed):
+        return []
+    nbytes = tif.get_size()
+    if nbytes <= 0:
+        nbytes = ed.calc_nbytes()
+    mask = (1 << (max(1, min(int(nbytes), 8)) * 8)) - 1
+    return [{"name": e.name, "value": int(e.value) & mask} for e in ed]
+
+
+def _named(name):
+    tif = T.tinfo_t()
+    if not tif.get_named_type(idahelp.til(), name):
+        raise IdbError(protocol.NOT_FOUND, f"no type named {name!r}")
+    return tif
+
+
+@handler("type")
+def type_(name, offset=0, count=None):
+    tif = _named(name)
+    result = {"name": name, "kind": _kind(tif), "size": tif.get_size(), "decl": str(tif)}
+    if tif.is_union() or tif.is_struct():
+        members, next_offset = idahelp.paginate(_udt_members(tif), offset, count)
+        result["members"] = members
+        result["is_union"] = tif.is_union()
+        return result, idahelp.page_meta(members, next_offset)
+    elif tif.is_enum():
+        members, next_offset = idahelp.paginate(_enum_members(tif), offset, count)
+        result["members"] = members
+        return result, idahelp.page_meta(members, next_offset)
+    return result
+
+
+@handler("types")
+def types(pattern=None, kind=None, offset=0, count=None, total=False):
+    til = idahelp.til()
+    pred = idahelp.name_filter(pattern)
+
+    def gen():
+        for ordn in range(1, T.get_ordinal_limit(til)):
+            name = T.get_numbered_type_name(til, ordn)
+            if not name or not pred(name):
+                continue
+            tif = T.tinfo_t()
+            if not tif.get_numbered_type(til, ordn):
+                continue
+            k = _kind(tif)
+            if kind and k != kind:
+                continue
+            yield {"ordinal": ordn, "name": name, "kind": k, "size": tif.get_size()}
+
+    items, next_offset = idahelp.paginate(gen(), offset, count if count else _LIST_DEFAULT)
+    total_count = sum(1 for _ in gen()) if total else None
+    return {"data": items}, idahelp.page_meta(items, next_offset, total_count)
+
+
+def _read_value(ea, size):
+    if not ida_bytes.is_mapped(ea):
+        return None
+    if size == 1:
+        return ida_bytes.get_byte(ea)
+    if size == 2:
+        return ida_bytes.get_word(ea)
+    if size == 4:
+        return ida_bytes.get_dword(ea)
+    if size == 8:
+        return ida_bytes.get_qword(ea)
+    data = ida_bytes.get_bytes(ea, min(size or 0, 32))
+    return data.hex() if data else None
+
+
+@handler("struct")
+def struct(type, addr=None, offset=0, count=None):
+    tif = _named(type)
+    if not (tif.is_struct() or tif.is_union()):
+        raise IdbError(protocol.BAD_ARGS, f"{type!r} is not a struct or union")
+    members = _udt_members(tif)
+    base = None
+    if addr is not None:
+        base = idahelp.resolve_target(addr)
+        for m in members:
+            m["value"] = _read_value(base + m["offset"], m["size"])
+    items, next_offset = idahelp.paginate(members, offset, count)
+    return ({"name": type, "kind": "union" if tif.is_union() else "struct",
+             "size": tif.get_size(), "addr": base, "members": items},
+            idahelp.page_meta(items, next_offset))
+
+
+def _join(prefix, name):
+    name = name or "<anon>"
+    return f"{prefix}.{name}" if prefix else name
+
+
+def _enter(mtype, off, path, paths, depth):
+    t = mtype
+    while t.is_array():
+        elem = t.get_array_element()
+        esize = max(1, elem.get_size())
+        path = f"{path}[{off // esize}]"
+        off = off % esize
+        t = elem
+    if t.is_struct() or t.is_union():
+        _walk(t, off, path, paths, depth + 1)
+    else:
+        paths.append({"path": path, "type": str(t), "size": t.get_size(), "offset": off})
+
+
+def _walk(tif, off, prefix, paths, depth=0):
+    if depth > 24:
+        return
+    if tif.is_union():
+        udt = T.udt_type_data_t()
+        if not tif.get_udt_details(udt):
+            return
+        for m in udt:
+            if off < max(1, m.type.get_size()):
+                _enter(m.type, off, _join(prefix, m.name), paths, depth)
+        return
+    if tif.is_struct():
+        idx = tif.find_udm(off * 8, T.STRMEM_OFFSET | T.STRMEM_SKIP_GAPS)
+        if idx < 0:
+            return
+        _, m = tif.get_udm(idx)
+        _enter(m.type, off - m.offset // 8, _join(prefix, m.name), paths, depth)
+        return
+    paths.append({"path": prefix, "type": str(tif), "size": tif.get_size(), "offset": off})
+
+
+@handler("member")
+def member(type, offset, page_offset=0, count=None):
+    if isinstance(offset, str):
+        off = int(offset, 16) if offset.lower().startswith("0x") else int(offset, 10)
+    else:
+        off = int(offset)
+    tif = _named(type)
+    if not (tif.is_struct() or tif.is_union()):
+        raise IdbError(protocol.BAD_ARGS, f"{type!r} is not a struct or union")
+    paths = []
+    _walk(tif, off, "", paths)
+    if not paths:
+        raise IdbError(protocol.NOT_FOUND, f"no member spans byte offset {off} of {type!r}")
+    items, next_offset = idahelp.paginate(paths, page_offset, count)
+    return {"type": type, "offset": off, "paths": items}, idahelp.page_meta(items, next_offset)
+
+
+def _typeof_lvar(func, var):
+    ea = idahelp.resolve_target(func)
+    f = ida_funcs.get_func(ea)
+    if f is None:
+        raise IdbError(protocol.NOT_FOUND, f"no function {func!r}")
+    import ida_hexrays
+
+    if ida_hexrays.init_hexrays_plugin():
+        try:
+            cfunc = ida_hexrays.decompile(f.start_ea)
+            for lv in cfunc.get_lvars():
+                if lv.name == var:
+                    lt = lv.type()
+                    return {"target": f"{func}:{var}", "kind": "lvar",
+                            "type": str(lt), "size": lt.get_size()}
+        except ida_hexrays.DecompilationFailure:
+            pass
+    ftif = T.tinfo_t()
+    if ftif.get_func_frame(f):
+        idx = ftif.find_udm(var)
+        if idx >= 0:
+            _, m = ftif.get_udm(idx)
+            return {"target": f"{func}:{var}", "kind": "stack",
+                    "type": str(m.type), "size": m.type.get_size()}
+    raise IdbError(protocol.NOT_FOUND, f"no local/stack variable {var!r} in {func!r}")
+
+
+@handler("typeof")
+def typeof(target):
+    try:
+        ea = idahelp.resolve_target(target)
+    except IdbError:
+        ea = None
+    if ea is None:
+        if ":" in target:
+            func, _, var = target.partition(":")
+            return _typeof_lvar(func, var)
+        raise IdbError(protocol.NOT_FOUND, f"cannot resolve {target!r}")
+
+    tif = T.tinfo_t()
+    if ida_nalt.get_tinfo(tif, ea):
+        return {"target": target, "ea": ea, "kind": _kind(tif),
+                "type": str(tif), "size": tif.get_size()}
+    guess = T.tinfo_t()
+    if T.guess_tinfo(guess, ea) != T.GUESS_FUNC_FAILED:
+        return {"target": target, "ea": ea, "kind": _kind(guess),
+                "type": str(guess), "size": guess.get_size(), "guessed": True}
+    raise IdbError(protocol.NOT_FOUND, f"no type information for {target!r}")
+
+
+@handler("frame")
+def frame(func, offset=0, count=None):
+    ea = idahelp.resolve_target(func)
+    f = ida_funcs.get_func(ea)
+    if f is None:
+        raise IdbError(protocol.NOT_FOUND, f"no function at {func!r}")
+    ftif = T.tinfo_t()
+    if not ftif.get_func_frame(f):
+        raise IdbError(protocol.IDA_ERROR, f"no stack frame for {func!r}")
+    members, next_offset = idahelp.paginate(_udt_members(ftif), offset, count)
+    return ({"func": ida_funcs.get_func_name(f.start_ea), "ea": f.start_ea,
+             "size": ftif.get_size(), "members": members},
+            idahelp.page_meta(members, next_offset))
+
+
+def _parse_type(spec):
+    til = idahelp.til()
+    existing = T.tinfo_t()
+    if existing.get_named_type(til, spec):
+        return existing
+
+    text = str(spec).strip().rstrip(";").strip()
+    candidates = [text + ";", f"{text} _idb;"]
+    lparen = text.find("(")
+    if lparen > 0 and text[lparen + 1:lparen + 2] not in ("*", "&"):
+        candidates.append(f"{text[:lparen].rstrip()} _idb{text[lparen:]};")
+
+    for candidate in candidates:
+        tif = T.tinfo_t()
+        name = T.parse_decl(tif, til, candidate, T.PT_SIL)
+        if name is not None and not tif.empty():
+            return tif
+
+    if not text:
+        raise IdbError(protocol.BAD_ARGS, f"could not parse type {spec!r}")
+    raise IdbError(protocol.BAD_ARGS, f"could not parse type {spec!r}")
+
+
+@handler("declare", writes=True)
+def declare(text):
+    errors = T.parse_decls(idahelp.til(), text, None, T.PT_SIL)
+    if errors != 0:
+        raise IdbError(protocol.IDA_ERROR, f"parse_decls reported {errors} error(s)")
+    return {"ok": True, "declared": text.strip()}
+
+
+def _settype_local(func, var, new_type):
+    f = ida_funcs.get_func(idahelp.resolve_target(func))
+    if f is None:
+        raise IdbError(protocol.NOT_FOUND, f"no function {func!r}")
+    import ida_hexrays
+
+    if ida_hexrays.init_hexrays_plugin():
+        try:
+            cfunc = ida_hexrays.decompile(f.start_ea)
+            for lv in cfunc.get_lvars():
+                if lv.name == var:
+                    lsi = ida_hexrays.lvar_saved_info_t()
+                    lsi.ll = lv
+                    lsi.type = new_type
+                    if ida_hexrays.modify_user_lvar_info(f.start_ea, ida_hexrays.MLI_TYPE, lsi):
+                        return {"target": f"{func}:{var}", "kind": "lvar", "type": str(new_type)}
+                    break
+        except ida_hexrays.DecompilationFailure:
+            pass
+    ftif = T.tinfo_t()
+    if ftif.get_func_frame(f):
+        idx = ftif.find_udm(var)
+        if idx >= 0:
+            _, m = ftif.get_udm(idx)
+            if ida_frame.set_frame_member_type(f, m.offset // 8, new_type):
+                return {"target": f"{func}:{var}", "kind": "stack", "type": str(new_type)}
+    raise IdbError(protocol.IDA_ERROR, f"could not set type of local {var!r} in {func!r}")
+
+
+@handler("settype", writes=True)
+def settype(target, type):
+    new_type = _parse_type(type)
+    try:
+        ea = idahelp.resolve_target(target)
+    except IdbError:
+        ea = None
+    if ea is None:
+        if ":" in target:
+            func, _, var = target.partition(":")
+            return _settype_local(func, var, new_type)
+        raise IdbError(protocol.NOT_FOUND, f"cannot resolve {target!r}")
+    if not T.apply_tinfo(ea, new_type, T.TINFO_DEFINITE):
+        raise IdbError(protocol.IDA_ERROR, f"apply_tinfo failed at {ea:#x}")
+    readback = T.tinfo_t()
+    ida_nalt.get_tinfo(readback, ea)
+    return {"ea": ea, "type": str(readback) if not readback.empty() else str(new_type)}
+
+
+def _member_index(tif, member):
+    s = str(member)
+    try:
+        off = int(s, 16) if s.lower().startswith("0x") else int(s, 10)
+        return tif.find_udm(off * 8, T.STRMEM_OFFSET | T.STRMEM_SKIP_GAPS)
+    except ValueError:
+        return tif.find_udm(s)
+
+
+@handler("setmember", writes=True)
+def setmember(type, member, new_type, new_name=None):
+    tif = _named(type)
+    if not (tif.is_struct() or tif.is_union()):
+        raise IdbError(protocol.BAD_ARGS, f"{type!r} is not a struct or union")
+    idx = _member_index(tif, member)
+    if idx < 0:
+        raise IdbError(protocol.NOT_FOUND, f"no member {member!r} in {type!r}")
+    code = tif.set_udm_type(idx, _parse_type(new_type))
+    if code != T.TERR_OK:
+        raise IdbError(protocol.IDA_ERROR, f"set_udm_type failed: {T.tinfo_errstr(code)}")
+    if new_name:
+        code = tif.rename_udm(idx, new_name)
+        if code != T.TERR_OK:
+            raise IdbError(protocol.IDA_ERROR, f"rename_udm failed: {T.tinfo_errstr(code)}")
+    _, m = tif.get_udm(idx)
+    return {"type": type, "index": idx, "name": m.name, "member_type": str(m.type)}
+
+
+def _parse_enum_members(members):
+    parsed, nxt = [], 0
+    for chunk in members.split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        if "=" in chunk:
+            key, raw = chunk.split("=", 1)
+            value = int(raw.strip(), 0)
+        else:
+            key, value = chunk, nxt
+        parsed.append({"name": key.strip(), "value": value})
+        nxt = value + 1
+    if not parsed:
+        raise IdbError(protocol.BAD_ARGS, "enum needs at least one k=v member")
+    return parsed
+
+
+def _enum_needs_unsigned(members):
+    return all(m["value"] >= 0 for m in members) and any(m["value"] > _INT_MAX for m in members)
+
+
+def _enum_nbytes(members):
+    max_value = max((m["value"] for m in members), default=0)
+    min_value = min((m["value"] for m in members), default=0)
+    if min_value < -0x80000000 or max_value > _UINT32_MAX:
+        return 8
+    return 4
+
+
+@handler("enum", writes=True)
+def enum(name, members, bitfield=False):
+    parsed = _parse_enum_members(members)
+    unsigned = _enum_needs_unsigned(parsed)
+
+    existing = T.tinfo_t()
+    if existing.get_named_type(idahelp.til(), name) and existing.is_enum():
+        if unsigned:
+            existing.set_enum_sign(False)
+        for m in parsed:
+            try:
+                existing.add_edm(m["name"], m["value"])
+            except ValueError as exc:
+                raise IdbError(protocol.IDA_ERROR, f"add enumerator {m['name']!r} failed: {exc}")
+        return {"name": name, "extended": True, "members": parsed}
+
+    ei = T.enum_type_data_t()
+    if unsigned:
+        ei.taenum_bits |= T.TAENUM_UNSIGNED
+    for m in parsed:
+        ei.push_back(T.edm_t(m["name"], m["value"]))
+    tid = T.create_enum_type(name, ei, _enum_nbytes(parsed), 0, bool(bitfield))
+    if tid == BADADDR:
+        raise IdbError(protocol.IDA_ERROR, f"create_enum_type failed for {name!r}")
+    return {"name": name, "extended": False, "bitfield": bool(bitfield), "members": parsed}
+
+
+def _union_arm_ordinal(union_tif, member):
+    """member as an int (or 0x-int) is the union-arm ordinal directly; otherwise a
+    field name resolved via find_udm. Union arms all share offset 0, so a byte-offset
+    lookup (as setmember uses) is meaningless here. Returns -1 if not an arm."""
+    s = str(member)
+    try:
+        return int(s, 16) if s.lower().startswith("0x") else int(s, 10)
+    except ValueError:
+        return union_tif.find_udm(s)
+
+
+def _addressable_ea(cfunc, item):
+    """Walk up from item to the nearest ctree node carrying a real ea. Union access
+    expressions are sometimes unaddressable (BADADDR); the decompiler keys a selection
+    on the addressable parent (see IDA's vds17 example)."""
+    while item is not None and item.ea == BADADDR:
+        item = cfunc.body.find_parent_of(item)
+    return item.ea if item is not None else BADADDR
+
+
+@handler("union_select", writes=True)
+def union_select(addr, member):
+    import ida_hexrays
+    import ida_pro
+
+    ea = idahelp.resolve_target(addr)
+    f = ida_funcs.get_func(ea)
+    if f is None:
+        raise IdbError(protocol.NOT_FOUND, f"no function contains {addr!r}")
+    if not ida_hexrays.init_hexrays_plugin():
+        raise IdbError(protocol.IDA_ERROR, "Hex-Rays is required for union-select")
+    try:
+        cfunc = ida_hexrays.decompile(f.start_ea)
+    except ida_hexrays.DecompilationFailure as exc:
+        raise IdbError(protocol.IDA_ERROR, f"decompilation failed: {exc}")
+    if cfunc is None:
+        raise IdbError(protocol.IDA_ERROR, "decompilation produced no result")
+    cfunc.get_pseudocode()
+
+    union_ops = (ida_hexrays.cot_memptr, ida_hexrays.cot_memref)
+    cands = []
+    items = cfunc.treeitems
+    for i in range(items.size()):
+        it = items.at(i)
+        if not it.is_expr() or it.op not in union_ops:
+            continue
+        e = it.cexpr
+        base = T.remove_pointer(e.x.type)
+        if not base.is_union():
+            continue
+        ordinal = _union_arm_ordinal(base, member)
+        cands.append({"it": it, "base": base, "expr_ea": e.ea,
+                      "site_ea": e.ea if e.ea != BADADDR else _addressable_ea(cfunc, it),
+                      "ordinal": ordinal, "valid": 0 <= ordinal < len(_udt_members(base))})
+
+    if not cands:
+        raise IdbError(protocol.NOT_FOUND,
+                       f"no union field access in {ida_funcs.get_func_name(f.start_ea)}")
+
+    at_ea = [c for c in cands if ea in (c["expr_ea"], c["site_ea"])]
+    if at_ea:
+        chosen = next((c for c in at_ea if c["valid"]), None)
+        if chosen is None:
+            arms = ", ".join(m["name"] for m in _udt_members(at_ea[0]["base"]))
+            raise IdbError(protocol.NOT_FOUND,
+                           f"union {at_ea[0]['base']} at {ea:#x} has no arm {member!r}; arms: {arms}")
+    else:
+        matching = [c for c in cands if c["valid"]]
+        sites = sorted({c["site_ea"] for c in matching})
+        if not matching:
+            raise IdbError(protocol.NOT_FOUND, f"no union arm named {member!r} at or near {ea:#x}")
+        if len(sites) > 1:
+            raise IdbError(protocol.BAD_ARGS,
+                           f"arm {member!r} is ambiguous across sites {', '.join(f'{s:#x}' for s in sites)}; "
+                           "pass the exact address")
+        chosen = matching[0]
+
+    key_ea = chosen["site_ea"]
+    if key_ea == BADADDR:
+        raise IdbError(protocol.IDA_ERROR, "the union access expression has no addressable location")
+    ordinal = chosen["ordinal"]
+
+    path = ida_pro.intvec_t()
+    path.push_back(ordinal)
+    cfunc.set_user_union_selection(key_ea, path)
+    cfunc.save_user_unions()
+
+    _, arm = chosen["base"].get_udm(ordinal)
+    union_name = str(chosen["base"])
+
+    ida_hexrays.mark_cfunc_dirty(f.start_ea)
+    verified = False
+    try:
+        cf2 = ida_hexrays.decompile(f.start_ea)
+        out = ida_pro.intvec_t()
+        if cf2 is not None and cf2.get_user_union_selection(key_ea, out):
+            verified = out.size() == 1 and out.at(0) == ordinal
+    except ida_hexrays.DecompilationFailure:
+        pass
+
+    return {"ea": key_ea, "func": ida_funcs.get_func_name(f.start_ea), "union": union_name,
+            "member": arm.name, "ordinal": ordinal, "path": [ordinal], "verified": verified}

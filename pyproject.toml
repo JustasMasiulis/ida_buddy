@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ida-buddy"
+version = "0.1.0"
+description = "windbg-flavored CLI for headless IDA Pro reverse engineering (idalib)"
+readme = "README.md"
+requires-python = ">=3.13"
+license = { text = "MIT" }
+authors = [{ name = "Armatum" }]
+dependencies = ["pyzmq>=25", "msgspec>=0.18"]
+
+# NB: idapro is intentionally NOT a dependency. The correct build ships with the
+# IDA install (idalib/python), not PyPI. `idb doctor` verifies it is importable.
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[project.scripts]
+idb = "idb.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/idb"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
