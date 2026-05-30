@@ -18,7 +18,6 @@ from idb import protocol, registry
 from idb.errors import IdbError
 from idb.transport import ZmqClient
 
-DEFAULT_IDLE_TTL = 1800.0
 DEFAULT_OPEN_DEADLINE = 600.0
 _RETRIES = 6
 
@@ -52,14 +51,14 @@ def _logtail(path, n=20):
         return ""
 
 
-def launch_worker(open_path, input_path, session_id, port, token, idle_ttl, save_policy, logfile):
+def launch_worker(open_path, input_path, session_id, port, token, save_policy, logfile):
     env = dict(os.environ)
     env["IDB_WORKER_TOKEN"] = token
     argv = [
         sys.executable, "-m", "idb.worker.main",
         "--port", str(port), "--session", session_id,
         "--open", open_path, "--input", os.path.abspath(input_path),
-        "--idle-ttl", str(idle_ttl), "--save-policy", save_policy, "--logfile", logfile,
+        "--save-policy", save_policy, "--logfile", logfile,
     ]
     creationflags = 0
     extra = {}
@@ -157,8 +156,7 @@ def _choose_open_path(target, fresh):
     return os.path.abspath(target)
 
 
-def open_or_reuse(target, fresh=False, idle_ttl=DEFAULT_IDLE_TTL,
-                  save_policy="save", deadline_s=DEFAULT_OPEN_DEADLINE):
+def open_or_reuse(target, fresh=False, save_policy="save", deadline_s=DEFAULT_OPEN_DEADLINE):
     session_id = registry.session_id(target)
     registry.cleanup_stale()
 
@@ -200,7 +198,7 @@ def open_or_reuse(target, fresh=False, idle_ttl=DEFAULT_IDLE_TTL,
         else:
             registry.write(entry)
 
-        proc = launch_worker(open_path, target, session_id, port, token, idle_ttl, save_policy, logfile)
+        proc = launch_worker(open_path, target, session_id, port, token, save_policy, logfile)
         ok, reason = _poll_ready(session_id, port, token, proc, time.time() + deadline_s)
         if ok:
             ready = registry.read(session_id)

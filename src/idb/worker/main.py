@@ -16,7 +16,6 @@ def _parse_args(argv):
     p.add_argument("--session", required=True)
     p.add_argument("--open", dest="open_path", required=True, help="path passed to open_database")
     p.add_argument("--input", dest="input_path", required=True, help="logical target (for display/identity)")
-    p.add_argument("--idle-ttl", type=float, default=1800.0)
     p.add_argument("--save-policy", default="save", choices=("save", "no-save"))
     p.add_argument("--logfile", default=None)
     return p.parse_args(argv)
@@ -38,7 +37,6 @@ def main(argv=None):
         session_id=args.session,
         open_path=args.open_path,
         input_path=args.input_path,
-        idle_ttl=args.idle_ttl,
         save_policy=args.save_policy,
         logfile=args.logfile,
     )

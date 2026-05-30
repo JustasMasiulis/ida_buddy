@@ -130,7 +130,6 @@ def build_parser():
     sp = cmd("open", help="spawn+analyze a binary/db and print a summary")
     sp.add_argument("target")
     sp.add_argument("--fresh", action="store_true", help="re-analyze from the binary")
-    sp.add_argument("--idle-ttl", dest="idle_ttl", type=float, default=None)
 
     cmd("sessions", help="list workers (alias: ps)")
     sp = cmd("close", help="shut a worker down")
@@ -383,7 +382,6 @@ def cmd_open(ns):
     entry, summary = spawn.open_or_reuse(
         ns.target,
         fresh=ns.fresh,
-        idle_ttl=ns.idle_ttl if ns.idle_ttl is not None else spawn.DEFAULT_IDLE_TTL,
         deadline_s=ns.timeout if ns.timeout else spawn.DEFAULT_OPEN_DEADLINE,
     )
     print(listing.format_open_summary(summary))

@@ -6,6 +6,8 @@ dist/
 .pytest_cache/
 .venv/
 venv/
+.claude
+.tmp
 
 # IDA databases + test fixtures (generated / third-party binaries)
 *.i64

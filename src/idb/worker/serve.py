@@ -13,7 +13,6 @@ from idb import protocol
 from idb.transport import ZmqServer
 from idb.worker import dispatch as dispatch_mod
 from idb.worker.dispatch import CTX, dispatch
-from idb.worker.lifecycle import WorkerLifecycle
 
 
 def _warmup():
@@ -37,7 +36,7 @@ def _save_decision(save_policy):
     return save_policy != "no-save"
 
 
-def serve(port, token, session_id, open_path, input_path, idle_ttl, save_policy, logfile=None):
+def serve(port, token, session_id, open_path, input_path, save_policy, logfile=None):
     import idapro
     import ida_auto
     import idc
@@ -67,7 +66,6 @@ def serve(port, token, session_id, open_path, input_path, idle_ttl, save_policy,
         logfile=logfile,
     )
 
-    life = None
     opened = False
     try:
         rc = idapro.open_database(open_path, True)
@@ -80,21 +78,17 @@ def serve(port, token, session_id, open_path, input_path, idle_ttl, save_policy,
 
         registry.update(session_id, status=registry.STATUS_READY, idb_path=idc.get_idb_path())
         CTX.ready = True
-        life = WorkerLifecycle(idle_ttl, on_expire=stop.set).start()
 
         while not stop.is_set():
             raw = server.recv(timeout_ms=500)
             if raw is None:
                 continue
             server.send(dispatch(raw))
-            life.touch()
     except IdbError as exc:
         print(f"worker error: {exc.code}: {exc.message}", file=sys.stderr, flush=True)
     except Exception as exc:
         print(f"worker crashed: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
     finally:
-        if life is not None:
-            life.stop()
         registry.unregister(session_id)
         if opened:
             save = _save_decision(save_policy)

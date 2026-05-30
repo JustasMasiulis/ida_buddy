@@ -41,7 +41,7 @@ reports the kernel version.
   available; mutating commands create an undo point first (`idb undo` / `idb redo`).
 - **Save policy:** `idb save` persists mid-session; `idb close` saves by default;
   `idb close --no-save` discards; `idb close --kill` hard-terminates a wedged
-  worker (no save); an idle worker shuts down after its TTL (saving).
+  worker (no save).
 - **Sessions** live in per-user registry files (`%LOCALAPPDATA%\ida-buddy`).
   Commands resolve a session by `-s <id>`, `--idb <path>`, or — when exactly one
   worker is healthy — automatically.
@@ -60,7 +60,7 @@ Aliases in parens. `[mut]` mutates the database (creates an undo point).
 
 | Command | Meaning |
 |---|---|
-| `open [--fresh] [--idle-ttl SEC] <path>` | spawn + analyze, print summary |
+| `open [--fresh] <path>` | spawn + analyze, print summary |
 | `sessions` (`ps`) / `close [--no-save\|--kill\|--all]` / `save` / `doctor` | lifecycle |
 | `segments` (`seg`) | segments + rwx |
 | `funcs [pat]` / `names <pat>` (`x`) / `nearest <addr>` (`ln`) | symbols |
