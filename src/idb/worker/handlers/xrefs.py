@@ -93,55 +93,103 @@ def _string_search_gen(pattern, start, end, budget):
         yield ea
 
 
-@handler("xref_to")
-def xref_to(addr, offset=0, count=None):
-    ea = idahelp.resolve_target(addr)
-    gen = (_ctx_row(x.frm, _kind(x.type)) for x in idautils.XrefsTo(ea))
-    items, next_offset = idahelp.paginate(gen, offset, count if count else _DEFAULT)
-    return {"data": items, "target": ea}, idahelp.page_meta(items, next_offset)
+def _to_rows(ea, tag):
+    for x in idautils.XrefsTo(ea):
+        row = _ctx_row(x.frm, _kind(x.type))
+        if tag:
+            row["dir"] = "to"
+        yield row
 
 
-@handler("xref_from")
-def xref_from(addr, offset=0, count=None):
+def _from_rows(ea, tag):
+    for x in idautils.XrefsFrom(ea):
+        row = _ctx_row(x.to, _kind(x.type))
+        if tag:
+            row["dir"] = "from"
+        yield row
+
+
+@handler("xrefs")
+def xrefs(addr, direction="to", offset=0, count=None):
     ea = idahelp.resolve_target(addr)
-    gen = (_ctx_row(x.to, _kind(x.type)) for x in idautils.XrefsFrom(ea))
+    if direction == "to":
+        gen = _to_rows(ea, False)
+    elif direction == "from":
+        gen = _from_rows(ea, False)
+    elif direction == "both":
+        def gen_both():
+            yield from _to_rows(ea, True)
+            yield from _from_rows(ea, True)
+        gen = gen_both()
+    else:
+        raise IdbError(protocol.BAD_ARGS, f"direction must be to/from/both, not {direction!r}")
     items, next_offset = idahelp.paginate(gen, offset, count if count else _DEFAULT)
-    return {"data": items, "source": ea}, idahelp.page_meta(items, next_offset)
+    return {"data": items, "addr": ea, "direction": direction}, idahelp.page_meta(items, next_offset)
+
+
+_CALLER_CEILING = 2000
 
 
 @handler("calls")
-def calls(func, offset=0, count=None):
+def calls(func, depth=1, offset=0, count=None):
     ea = idahelp.resolve_target(func)
     f = ida_funcs.get_func(ea)
     if f is None:
         raise IdbError(protocol.NOT_FOUND, f"no function at {func!r}")
     start = f.start_ea
+    depth = max(1, int(depth))
+
+    def caller_gen():
+        visited = {start}
+        frontier = [start]
+        for level in range(1, depth + 1):
+            next_frontier = []
+            for target in frontier:
+                for x in idautils.XrefsTo(target):
+                    if x.type not in _CALL_TYPES:
+                        continue
+                    yield {"ea": x.frm, "func": idahelp.func_name_at(x.frm),
+                           "insn": _insn(x.frm), "depth": level}
+                    cf = ida_funcs.get_func(x.frm)
+                    if cf is not None and cf.start_ea not in visited and len(visited) < _CALLER_CEILING:
+                        visited.add(cf.start_ea)
+                        next_frontier.append(cf.start_ea)
+            if not next_frontier:
+                break
+            frontier = next_frontier
 
     seen = set()
+    callees = []
+    for item in idautils.FuncItems(start):
+        for x in idautils.XrefsFrom(item):
+            if x.type in _CALL_TYPES and x.to not in seen:
+                seen.add(x.to)
+                name = idahelp.func_name_at(x.to) or ida_name.get_name(x.to) or ""
+                callees.append({"ea": x.to, "name": name, "from": item})
+
+    callers, next_offset = idahelp.paginate(caller_gen(), offset, count)
+    return ({"func": ida_funcs.get_func_name(start), "ea": start, "depth": depth,
+             "callers": callers, "callees": callees},
+            idahelp.page_meta(callers, next_offset))
+
+
+@handler("strrefs")
+def strrefs(pattern, offset=0, count=None):
+    pred = idahelp.name_filter(pattern)
 
     def gen():
-        for x in idautils.XrefsTo(start):
-            if x.type in _CALL_TYPES:
-                yield "caller", {"ea": x.frm, "func": idahelp.func_name_at(x.frm), "insn": _insn(x.frm)}
+        for s in idautils.Strings():
+            text = str(s)
+            if not pred(text):
+                continue
+            for x in idautils.XrefsTo(s.ea):
+                row = _ctx_row(x.frm, _kind(x.type))
+                row["str_ea"] = s.ea
+                row["str"] = text[:48]
+                yield row
 
-        for item in idautils.FuncItems(start):
-            for x in idautils.XrefsFrom(item):
-                if x.type in _CALL_TYPES and x.to not in seen:
-                    seen.add(x.to)
-                    name = idahelp.func_name_at(x.to) or ida_name.get_name(x.to) or ""
-                    yield "callee", {"ea": x.to, "name": name, "from": item}
-
-    rows, next_offset = idahelp.paginate(gen(), offset, count)
-    callers, callees = [], []
-    for kind, row in rows:
-        if kind == "caller":
-            callers.append(row)
-        else:
-            callees.append(row)
-
-    return ({"func": ida_funcs.get_func_name(start), "ea": start,
-             "callers": callers, "callees": callees},
-            idahelp.page_meta(rows, next_offset))
+    items, next_offset = idahelp.paginate(gen(), offset, count if count else _DEFAULT)
+    return {"data": items, "pattern": pattern}, idahelp.page_meta(items, next_offset)
 
 def _search_gen(kind, pattern, start, end, budget):
     if kind == "ref":

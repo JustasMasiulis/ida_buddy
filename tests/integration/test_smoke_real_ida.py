@@ -86,11 +86,17 @@ def _entry_ea(client):
     return eps[0]["ea"]
 
 
-def test_disas_function(client):
-    result, _ = ok(client, "disas", {"target": hex(_entry_ea(client))})
+def test_uf_whole_function(client):
+    result, _ = ok(client, "disas", {"target": hex(_entry_ea(client)), "whole": True})
     assert result["mode"] == "func"
     assert result["func"]["name"]
     assert result["lines"] and all("ea" in ln and ln["text"] for ln in result["lines"])
+
+
+def test_bare_disas_is_a_window(client):
+    result, _ = ok(client, "disas", {"target": hex(_entry_ea(client))})
+    assert result["mode"] == "raw"
+    assert result["lines"]
 
 
 def test_disas_raw_count_paginates(client):
@@ -118,6 +124,21 @@ def test_read_values(client):
     ea = _entry_ea(client)
     result, _ = ok(client, "read", {"addr": hex(ea), "width": 4, "count": 4})
     assert result["values"] and all(isinstance(v, int) for v in result["values"])
+
+
+def test_pointers_dump(client):
+    ea = _entry_ea(client)
+    result, _ = ok(client, "pointers", {"addr": hex(ea), "count": 4})
+    assert result["width"] in (4, 8)
+    assert result["data"] and all("ea" in r and "value" in r for r in result["data"])
+
+
+def test_string_struct_runs(client):
+    # The entry bytes are not a real counted string; this only asserts the handler
+    # executes its IDA calls and returns a well-formed envelope.
+    result, _ = ok(client, "string_struct", {"addr": hex(_entry_ea(client)), "wide": True})
+    assert {"addr", "wide", "length", "maxlen", "buffer", "text"} <= set(result)
+    assert result["wide"] is True
 
 
 def test_read_unmapped_is_bad_address(client):
@@ -151,16 +172,42 @@ def test_nearest_in_function(client):
     assert result["func"] is not None
 
 
-def test_xref_to_returns_context(client):
-    result, _ = ok(client, "xref_to", {"addr": hex(_entry_ea(client))})
+def test_xrefs_returns_context(client):
+    result, _ = ok(client, "xrefs", {"addr": hex(_entry_ea(client))})
     assert isinstance(result["data"], list)
     for row in result["data"]:
         assert {"ea", "kind", "insn"} <= set(row)
 
 
+def test_xrefs_both_tags_direction(client):
+    result, _ = ok(client, "xrefs", {"addr": hex(_entry_ea(client)), "direction": "both"})
+    assert isinstance(result["data"], list)
+    assert all(r.get("dir") in ("to", "from") for r in result["data"])
+
+
 def test_calls_structure(client):
     result, _ = ok(client, "calls", {"func": hex(_entry_ea(client))})
     assert isinstance(result["callers"], list) and isinstance(result["callees"], list)
+
+
+def test_calls_depth_expands_callers(client):
+    ea = hex(_entry_ea(client))
+    d1, _ = ok(client, "calls", {"func": ea, "depth": 1})
+    d2, _ = ok(client, "calls", {"func": ea, "depth": 2})
+    assert d2["depth"] == 2
+    assert len(d2["callers"]) >= len(d1["callers"])
+    assert all(c.get("depth", 1) >= 1 for c in d2["callers"])
+
+
+def test_strrefs_runs(client):
+    strs, _ = ok(client, "strings", {"count": 40})
+    target = next((s for s in strs["data"] if len(s["text"]) >= 4 and s["text"][:8].isprintable()), None)
+    if target is None:
+        pytest.skip("no usable string")
+    result, _ = ok(client, "strrefs", {"pattern": target["text"][:6], "count": 50})
+    assert isinstance(result["data"], list)
+    for row in result["data"]:
+        assert {"ea", "kind", "insn", "str_ea"} <= set(row)
 
 
 def test_search_bytes_finds_self(client):
@@ -242,8 +289,25 @@ def test_type_struct_and_member(client):
         assert m["paths"] and all("path" in p and "type" in p for p in m["paths"])
 
 
+def test_type_value_overlay(client):
+    structs, _ = ok(client, "types", {"kind": "struct", "count": 50})
+    if not structs["data"]:
+        pytest.skip("no structs with type info")
+    name = structs["data"][0]["name"]
+    typ, _ = ok(client, "type", {"name": name, "addr": hex(_entry_ea(client))})
+    assert typ.get("addr") is not None
+    assert all("value" in m for m in typ.get("members", []))
+
+
 def test_typeof_function(client):
     result, _ = ok(client, "typeof", {"target": hex(_entry_ea(client))})
+    assert result["type"]
+
+
+def test_type_on_address_dispatches_to_typeof(client):
+    # `dt <address>` (a non-type-name argument) routes to the typeof path.
+    result, _ = ok(client, "type", {"name": hex(_entry_ea(client))})
+    assert result.get("target") is not None
     assert result["type"]
 
 
@@ -387,6 +451,83 @@ def test_settype_local_lvar(client):
     ok(client, "settype", {"target": target, "type": "char"})
     res, _ = ok(client, "typeof", {"target": target})
     assert "char" in res["type"]
+
+
+def test_setlvar_rename_and_retype(client):
+    if not _has_hexrays(client):
+        pytest.skip("no Hex-Rays")
+    import re
+
+    funcs, _ = ok(client, "funcs", {"count": 40})
+    chosen = None
+    for f in funcs["data"]:
+        dec = client.call("decompile", {"func": hex(f["ea"])}, timeout_ms=60000)
+        if not protocol.is_ok(dec):
+            continue
+        for line in dec["result"]["lines"]:
+            m = re.match(r"\s+[\w ]+?\b([A-Za-z_]\w*);\s*//", line)
+            if m:
+                chosen = (f["ea"], m.group(1))
+                break
+        if chosen:
+            break
+    if not chosen:
+        pytest.skip("no function with a local variable found")
+    func_hex = hex(chosen[0])
+    res, _ = ok(client, "setlvar", {"func": func_hex, "var": chosen[1], "name": "idb_lv", "type": "int"})
+    assert res["kind"] == "lvar"
+    assert res["name"] == "idb_lv"
+    assert "int" in res["type"]
+    readback, _ = ok(client, "typeof", {"target": f"{func_hex}:idb_lv"})
+    assert "int" in readback["type"]
+    ok(client, "undo")
+
+
+# --- `op` operand-representation tests run LAST on the shared worker: applying an
+# operand format forces a re-decompile of the touched function, which can destabilize
+# Hex-Rays lvar-name persistence for the local-variable tests above. The op change
+# itself is cleanly undoable (verified at the disassembly level); this is only about
+# not perturbing earlier tests that share the one analyzed database.
+
+def _find_imm_instruction(client):
+    import re
+
+    funcs, _ = ok(client, "funcs", {"count": 80})
+    for f in funcs["data"]:
+        dis, _ = ok(client, "disas", {"target": hex(f["ea"]), "whole": True})
+        for ln in dis["lines"]:
+            if re.search(r",\s*[0-9A-Fa-f]+h\b", ln["text"]):
+                return ln["ea"]
+    return None
+
+
+def test_op_char_and_undo(client):
+    ea = _find_imm_instruction(client)
+    if ea is None:
+        pytest.skip("no instruction with an immediate operand found")
+    res, _ = ok(client, "op", {"addr": hex(ea), "fmt": "char"})
+    assert res["disasm"] is True and res["repr"] == "char"
+    assert isinstance(res["pseudocode"], bool)
+    ok(client, "undo")
+
+
+def test_op_enum_apply_and_undo(client):
+    ea = _find_imm_instruction(client)
+    if ea is None:
+        pytest.skip("no instruction with an immediate operand found")
+    ok(client, "enum", {"name": "IDB_OP_E", "members": "A=1,B=2", "bitfield": False})
+    res, _ = ok(client, "op", {"addr": hex(ea), "fmt": "enum:IDB_OP_E"})
+    assert res["repr"] == "enum:IDB_OP_E" and res["disasm"] is True
+    ok(client, "undo")
+
+
+def test_op_errors(client):
+    bad_addr = client.call("op", {"addr": "0x1", "fmt": "hex"})
+    assert not protocol.is_ok(bad_addr) and bad_addr["error"]["code"] == protocol.BAD_ADDRESS
+    bad_fmt = client.call("op", {"addr": hex(_entry_ea(client)), "fmt": "bogus"})
+    assert not protocol.is_ok(bad_fmt) and bad_fmt["error"]["code"] == protocol.BAD_ARGS
+    no_enum = client.call("op", {"addr": hex(_entry_ea(client)), "fmt": "enum:__no_such_enum__"})
+    assert not protocol.is_ok(no_enum) and no_enum["error"]["code"] == protocol.NOT_FOUND
 
 
 def test_settype_function_prototype(client):

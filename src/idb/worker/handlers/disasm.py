@@ -53,12 +53,12 @@ def _walk(ea):
 
 
 @handler("disas")
-def disas(target, count=None, offset=0):
+def disas(target, count=None, offset=0, whole=False):
     ea = idahelp.resolve_target(target)
     if not ida_bytes.is_mapped(ea):
         raise IdbError(protocol.BAD_ADDRESS, f"address {ea:#x} is not mapped")
     f = ida_funcs.get_func(ea)
-    if f is not None and count is None:
+    if whole and f is not None and count is None:
         gen = (_line(e) for e in idautils.FuncItems(f.start_ea))
         items, next_offset = idahelp.paginate(gen, offset, _FUNC_CAP)
         return ({"mode": "func", "func": _func_header(f), "lines": items},

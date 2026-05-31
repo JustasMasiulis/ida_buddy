@@ -1,9 +1,12 @@
 """memory handlers: read (db/dw/dd/dq), string (da/du)."""
 
 import ida_bytes
+import ida_funcs
 import ida_ida
+import ida_name
 import ida_nalt
 import ida_segment
+from ida_idaapi import BADADDR
 
 from idb import protocol
 from idb.errors import IdbError
@@ -11,6 +14,25 @@ from idb.worker import idahelp
 from idb.worker.dispatch import handler
 
 _GETTERS = {2: ida_bytes.get_word, 4: ida_bytes.get_dword, 8: ida_bytes.get_qword}
+
+
+def _ptr_size():
+    return 8 if ida_ida.inf_get_app_bitness() == 64 else 4
+
+
+def _symbolize(ea):
+    name = ida_name.get_name(ea)
+    if name:
+        return name, 0
+    f = ida_funcs.get_func(ea)
+    if f is not None:
+        return ida_funcs.get_func_name(f.start_ea), ea - f.start_ea
+    head = ida_bytes.get_item_head(ea)
+    if head != BADADDR and head != ea:
+        hname = ida_name.get_name(head)
+        if hname:
+            return hname, ea - head
+    return None, 0
 
 
 def _string_encoding(strtype):
@@ -91,3 +113,41 @@ def string(addr, encoding=None):
     byte_length = _string_storage_size(ea, strtype, raw)
     return {"addr": ea, "encoding": encoding,
             "bytes": raw, "text": text, "length": byte_length}
+
+
+@handler("pointers")
+def pointers(addr, count=None, offset=0):
+    width = _ptr_size()
+    ea = idahelp.resolve_target(addr) + (offset or 0) * width
+    if not ida_bytes.is_mapped(ea):
+        raise IdbError(protocol.BAD_ADDRESS, f"address {ea:#x} is not mapped")
+    seg = ida_segment.getseg(ea)
+    seg_end = seg.end_ea if seg else ida_ida.inf_get_max_ea()
+    getter = _GETTERS[width]
+    rows, cur = [], ea
+    for _ in range(count if count else 16):
+        if cur + width > seg_end:
+            break
+        value = int(getter(cur))
+        sym, off = _symbolize(value) if ida_bytes.is_mapped(value) else (None, 0)
+        rows.append({"ea": cur, "value": value, "sym": sym, "off": off})
+        cur += width
+    return {"addr": ea, "width": width, "data": rows, "count": len(rows)}
+
+
+@handler("string_struct")
+def string_struct(addr, wide=False):
+    ea = idahelp.resolve_target(addr)
+    if not ida_bytes.is_mapped(ea):
+        raise IdbError(protocol.BAD_ADDRESS, f"address {ea:#x} is not mapped")
+    ptr = _ptr_size()
+    length = ida_bytes.get_word(ea)
+    maxlen = ida_bytes.get_word(ea + 2)
+    buffer = ida_bytes.get_qword(ea + 8) if ptr == 8 else ida_bytes.get_dword(ea + 4)
+    text = ""
+    if length and ida_bytes.is_mapped(buffer):
+        raw = ida_bytes.get_bytes(buffer, length) or b""
+        enc = ("utf-16-be" if ida_ida.inf_is_be() else "utf-16-le") if wide else "latin-1"
+        text = raw.decode(enc, "replace")
+    return {"addr": ea, "wide": wide, "length": length, "maxlen": maxlen,
+            "buffer": buffer, "text": text}

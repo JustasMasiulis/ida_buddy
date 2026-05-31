@@ -12,6 +12,12 @@ def format_comment(result, ns=None):
     return f"comment @ {result['ea']:#x} ({views}): {result['comment']}"
 
 
+def format_op(result, ns=None):
+    views = "disasm+pseudo" if result.get("pseudocode") else "disasm"
+    where = f" op{result['opnum']}" if result.get("opnum") is not None else ""
+    return f"op @ {result['ea']:#x}{where} -> {result['repr']} ({views})"
+
+
 def format_patch(result, ns=None):
     data = result.get("bytes", b"")
     hexs = data.hex() if isinstance(data, (bytes, bytearray)) else ""
@@ -38,6 +44,10 @@ def format_settype(result, ns=None):
 
 def format_setmember(result, ns=None):
     return f"{result['type']}[{result['index']}] {result['name']} : {result['member_type']}"
+
+
+def format_setlvar(result, ns=None):
+    return f"{result['target']} : {result['type']}"
 
 
 def format_enum(result, ns=None):

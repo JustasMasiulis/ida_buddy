@@ -22,21 +22,18 @@ def _members_table(members, with_values=False):
 
 
 def format_type(result, ns=None):
+    if "target" in result:  # dt dispatched to typeof (an address / symbol / func:var arg)
+        return format_typeof(result, ns)
     head = f"{result['kind']} {result['name']}   size {result['size']:#x}"
+    if result.get("addr") is not None:
+        head += f"   @ {result['addr']:#x}"
     members = result.get("members")
     if members is None:
         return f"{head}\n  {result.get('decl', '')}"
     if result["kind"] == "enum":
         rows = [(m["name"], hex(m["value"])) for m in members]
         return head + "\n" + align(rows, headers=("NAME", "VALUE"), aligns=("<", ">"))
-    return head + "\n" + _members_table(members)
-
-
-def format_struct(result, ns=None):
-    head = f"{result['kind']} {result['name']}   size {result['size']:#x}"
-    if result.get("addr") is not None:
-        head += f"   @ {result['addr']:#x}"
-    return head + "\n" + _members_table(result.get("members", []), with_values=result.get("addr") is not None)
+    return head + "\n" + _members_table(members, with_values=result.get("addr") is not None)
 
 
 def format_types(result, ns=None):

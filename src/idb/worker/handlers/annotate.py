@@ -1,4 +1,4 @@
-"""annotate handlers: rename, comment, patch, undo, redo.
+"""annotate handlers: rename, comment, op, patch, undo, redo.
 
 Mutating handlers are registered writes=True so dispatch creates an undo point
 before they run. undo/redo are NOT writes (they must not create undo points of
@@ -10,7 +10,9 @@ import ida_bytes
 import ida_funcs
 import ida_hexrays
 import ida_name
+import ida_typeinf
 import ida_undo
+from ida_idaapi import BADADDR
 
 from idb import protocol
 from idb.errors import IdbError
@@ -76,6 +78,50 @@ def comment(addr, text):
     if f is not None:
         pseudocode = _set_pseudocode_comment(f.start_ea, ea, text)
     return {"ea": ea, "comment": text, "disasm": True, "pseudocode": pseudocode}
+
+
+_OPS = {
+    "hex": ida_bytes.op_hex,
+    "dec": ida_bytes.op_dec,
+    "oct": ida_bytes.op_oct,
+    "bin": ida_bytes.op_bin,
+    "char": ida_bytes.op_chr,
+    "num": ida_bytes.op_num,
+}
+
+
+@handler("op", writes=True)
+def op(addr, fmt, opnum=None):
+    """Set an operand's display representation. radix/char/num use ida_bytes.op_*;
+    `enum:NAME` resolves the enum tid via get_named_type_tid. The disassembly setters
+    propagate into the Hex-Rays pseudocode for char/enum/num (the decompiler manages
+    its own number radix), so we mark the enclosing function dirty to refresh it."""
+    ea = idahelp.resolve_target(addr)
+    if not ida_bytes.is_mapped(ea):
+        raise IdbError(protocol.BAD_ADDRESS, f"address {ea:#x} is not mapped")
+    n = opnum if opnum is not None else ida_bytes.OPND_ALL
+    if fmt.startswith("enum:"):
+        name = fmt[len("enum:"):]
+        if not name:
+            raise IdbError(protocol.BAD_ARGS, "enum: needs a type name (enum:NAME)")
+        tid = ida_typeinf.get_named_type_tid(name)
+        if tid == BADADDR:
+            raise IdbError(protocol.NOT_FOUND, f"no enum named {name!r}")
+        ok = ida_bytes.op_enum(ea, n, tid, 0)
+    elif fmt in _OPS:
+        ok = _OPS[fmt](ea, n)
+    else:
+        raise IdbError(protocol.BAD_ARGS,
+                       f"unknown representation {fmt!r} (hex/dec/oct/bin/char/num/enum:NAME)")
+    if not ok:
+        raise IdbError(protocol.IDA_ERROR,
+                       f"could not set representation at {ea:#x} (operand {n}: not a number?)")
+    pseudocode = False
+    f = ida_funcs.get_func(ea)
+    if f is not None and ida_hexrays.init_hexrays_plugin():
+        ida_hexrays.mark_cfunc_dirty(f.start_ea)
+        pseudocode = True
+    return {"ea": ea, "repr": fmt, "opnum": opnum, "disasm": True, "pseudocode": pseudocode}
 
 
 @handler("patch", writes=True)

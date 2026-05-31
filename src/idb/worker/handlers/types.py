@@ -74,15 +74,31 @@ def _named(name):
 
 
 @handler("type")
-def type_(name, offset=0, count=None):
-    tif = _named(name)
+def type_(name, addr=None, offset=0, count=None):
+    tif = T.tinfo_t()
+    if not tif.get_named_type(idahelp.til(), name):
+        # Not a named type: treat the argument as an instance (address / symbol /
+        # func:var) and report its type, windbg `dt <address>`-style. An overlay
+        # address makes no sense for an instance.
+        if addr is not None:
+            raise IdbError(protocol.BAD_ARGS,
+                           f"{name!r} is not a named type; name a struct/union to overlay {addr!r}")
+        return _typeof(name)
     result = {"name": name, "kind": _kind(tif), "size": tif.get_size(), "decl": str(tif)}
     if tif.is_union() or tif.is_struct():
+        base = idahelp.resolve_target(addr) if addr is not None else None
         members, next_offset = idahelp.paginate(_udt_members(tif), offset, count)
+        if base is not None:
+            for m in members:
+                m["value"] = _read_value(base + m["offset"], m["size"])
         result["members"] = members
         result["is_union"] = tif.is_union()
+        result["addr"] = base
         return result, idahelp.page_meta(members, next_offset)
-    elif tif.is_enum():
+    if addr is not None:
+        raise IdbError(protocol.BAD_ARGS,
+                       f"value overlay requires a struct or union, not {result['kind']}")
+    if tif.is_enum():
         members, next_offset = idahelp.paginate(_enum_members(tif), offset, count)
         result["members"] = members
         return result, idahelp.page_meta(members, next_offset)
@@ -125,23 +141,6 @@ def _read_value(ea, size):
         return ida_bytes.get_qword(ea)
     data = ida_bytes.get_bytes(ea, min(size or 0, 32))
     return data.hex() if data else None
-
-
-@handler("struct")
-def struct(type, addr=None, offset=0, count=None):
-    tif = _named(type)
-    if not (tif.is_struct() or tif.is_union()):
-        raise IdbError(protocol.BAD_ARGS, f"{type!r} is not a struct or union")
-    members = _udt_members(tif)
-    base = None
-    if addr is not None:
-        base = idahelp.resolve_target(addr)
-        for m in members:
-            m["value"] = _read_value(base + m["offset"], m["size"])
-    items, next_offset = idahelp.paginate(members, offset, count)
-    return ({"name": type, "kind": "union" if tif.is_union() else "struct",
-             "size": tif.get_size(), "addr": base, "members": items},
-            idahelp.page_meta(items, next_offset))
 
 
 def _join(prefix, name):
@@ -228,8 +227,7 @@ def _typeof_lvar(func, var):
     raise IdbError(protocol.NOT_FOUND, f"no local/stack variable {var!r} in {func!r}")
 
 
-@handler("typeof")
-def typeof(target):
+def _typeof(target):
     try:
         ea = idahelp.resolve_target(target)
     except IdbError:
@@ -249,6 +247,11 @@ def typeof(target):
         return {"target": target, "ea": ea, "kind": _kind(guess),
                 "type": str(guess), "size": guess.get_size(), "guessed": True}
     raise IdbError(protocol.NOT_FOUND, f"no type information for {target!r}")
+
+
+@handler("typeof")
+def typeof(target):
+    return _typeof(target)
 
 
 @handler("frame")
@@ -297,25 +300,40 @@ def declare(text):
     return {"ok": True, "declared": text.strip()}
 
 
+def _hexrays_lvar(func_start, var):
+    """Decompile func_start and locate the lvar named var. Returns (cfunc, lvar);
+    the caller MUST keep cfunc referenced while using lvar (the lvar is owned by it).
+    Either element is None when Hex-Rays is unavailable, decompilation fails, or no
+    such lvar exists."""
+    import ida_hexrays
+
+    if not ida_hexrays.init_hexrays_plugin():
+        return None, None
+    try:
+        cfunc = ida_hexrays.decompile(func_start)
+    except ida_hexrays.DecompilationFailure:
+        return None, None
+    if cfunc is None:
+        return None, None
+    for lv in cfunc.get_lvars():
+        if lv.name == var:
+            return cfunc, lv
+    return cfunc, None
+
+
 def _settype_local(func, var, new_type):
     f = ida_funcs.get_func(idahelp.resolve_target(func))
     if f is None:
         raise IdbError(protocol.NOT_FOUND, f"no function {func!r}")
     import ida_hexrays
 
-    if ida_hexrays.init_hexrays_plugin():
-        try:
-            cfunc = ida_hexrays.decompile(f.start_ea)
-            for lv in cfunc.get_lvars():
-                if lv.name == var:
-                    lsi = ida_hexrays.lvar_saved_info_t()
-                    lsi.ll = lv
-                    lsi.type = new_type
-                    if ida_hexrays.modify_user_lvar_info(f.start_ea, ida_hexrays.MLI_TYPE, lsi):
-                        return {"target": f"{func}:{var}", "kind": "lvar", "type": str(new_type)}
-                    break
-        except ida_hexrays.DecompilationFailure:
-            pass
+    cfunc, lv = _hexrays_lvar(f.start_ea, var)
+    if lv is not None:
+        lsi = ida_hexrays.lvar_saved_info_t()
+        lsi.ll = lv
+        lsi.type = new_type
+        if ida_hexrays.modify_user_lvar_info(f.start_ea, ida_hexrays.MLI_TYPE, lsi):
+            return {"target": f"{func}:{var}", "kind": "lvar", "type": str(new_type)}
     ftif = T.tinfo_t()
     if ftif.get_func_frame(f):
         idx = ftif.find_udm(var)
@@ -343,6 +361,40 @@ def settype(target, type):
     readback = T.tinfo_t()
     ida_nalt.get_tinfo(readback, ea)
     return {"ea": ea, "type": str(readback) if not readback.empty() else str(new_type)}
+
+
+@handler("setlvar", writes=True)
+def setlvar(func, var, name=None, type=None):
+    import ida_hexrays
+
+    if not name and not type:
+        raise IdbError(protocol.BAD_ARGS, "setlvar needs --name and/or --type")
+    f = ida_funcs.get_func(idahelp.resolve_target(func))
+    if f is None:
+        raise IdbError(protocol.NOT_FOUND, f"no function {func!r}")
+    if not ida_hexrays.init_hexrays_plugin():
+        raise IdbError(protocol.IDA_ERROR, "Hex-Rays is required for setlvar")
+    cfunc, lv = _hexrays_lvar(f.start_ea, var)
+    if lv is None:
+        raise IdbError(protocol.NOT_FOUND, f"no local variable {var!r} in {func!r}")
+
+    type_str = str(lv.type())
+    if type:
+        new_type = _parse_type(type)
+        lsi = ida_hexrays.lvar_saved_info_t()
+        lsi.ll = lv
+        lsi.type = new_type
+        if not ida_hexrays.modify_user_lvar_info(f.start_ea, ida_hexrays.MLI_TYPE, lsi):
+            raise IdbError(protocol.IDA_ERROR, f"could not set type of {var!r}")
+        type_str = str(new_type)
+
+    final_name = var
+    if name and name != var:
+        if not ida_hexrays.rename_lvar(f.start_ea, var, name):
+            raise IdbError(protocol.IDA_ERROR,
+                           f"could not rename {var!r} -> {name!r} (name already in use?)")
+        final_name = name
+    return {"target": f"{func}:{final_name}", "kind": "lvar", "name": final_name, "type": type_str}
 
 
 def _member_index(tif, member):

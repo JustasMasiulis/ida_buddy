@@ -1,7 +1,7 @@
 """idb command-line front end. Imports NO ida_* / idapro — it resolves a session
 from the registry files and does one RPC round-trip per invocation.
 
-Windbg-flavored aliases (u, dec, db/dw/dd/dq, da/du, x, ln, ps, seg, t) are
+Windbg-flavored aliases (u, dec, db/dw/dd/dq, da/du, x, ln, dt) are
 accepted by argparse, then canonicalized through the ALIASES table so aliases
 can carry distinct option defaults (e.g. db vs dq both map to `read` with
 different widths).
@@ -28,6 +28,7 @@ DEFAULT_TIMEOUT = 30.0
 
 ALIASES = {
     "u": ("disas", {}),
+    "uf": ("disas", {"whole": True}),
     "dec": ("decompile", {}),
     "db": ("read", {"width": 1}),
     "dw": ("read", {"width": 2}),
@@ -35,11 +36,17 @@ ALIASES = {
     "dq": ("read", {"width": 8}),
     "da": ("string", {"encoding": "ascii"}),
     "du": ("string", {"encoding": "utf16"}),
+    "dps": ("pointers", {}),
+    "dqs": ("pointers", {}),
+    "ds": ("string_struct", {"wide": False}),
+    "dS": ("string_struct", {"wide": True}),
     "x": ("names", {}),
     "ln": ("nearest", {}),
-    "ps": ("sessions", {}),
-    "seg": ("segments", {}),
-    "t": ("type", {}),
+    "dt": ("type", {}),
+    "struct": ("type", {}),
+    "s": ("search", {}),
+    "xref_to": ("xrefs", {"direction": "to"}),
+    "xref_from": ("xrefs", {"direction": "from"}),
 }
 
 _ALIASES_BY_COMMAND = {}
@@ -54,30 +61,33 @@ FORMATTERS = {
     "decompile": fmt_disasm.format_decompile,
     "read": fmt_memory.format_read,
     "string": fmt_memory.format_string,
+    "pointers": fmt_memory.format_pointers,
+    "string_struct": fmt_memory.format_string_struct,
     "funcs": listing.format_funcs,
     "names": listing.format_names,
     "imports": listing.format_imports,
     "exports": listing.format_exports,
     "strings": listing.format_strings,
     "nearest": listing.format_nearest,
-    "xref_to": fmt_xrefs.format_xrefs,
-    "xref_from": fmt_xrefs.format_xrefs,
+    "xrefs": fmt_xrefs.format_xrefs,
     "calls": fmt_xrefs.format_calls,
+    "strrefs": fmt_xrefs.format_strrefs,
     "search": fmt_xrefs.format_search,
     "type": fmt_types.format_type,
     "types": fmt_types.format_types,
-    "struct": fmt_types.format_struct,
     "member": fmt_types.format_member,
     "typeof": fmt_types.format_typeof,
     "frame": fmt_types.format_frame,
     "rename": fmt_writes.format_rename,
     "comment": fmt_writes.format_comment,
+    "op": fmt_writes.format_op,
     "patch": fmt_writes.format_patch,
     "undo": fmt_writes.format_undo,
     "redo": fmt_writes.format_redo,
     "declare": fmt_writes.format_declare,
     "settype": fmt_writes.format_settype,
     "setmember": fmt_writes.format_setmember,
+    "setlvar": fmt_writes.format_setlvar,
     "enum": fmt_writes.format_enum,
     "union_select": fmt_writes.format_union_select,
 }
@@ -131,7 +141,7 @@ def build_parser():
     sp.add_argument("target")
     sp.add_argument("--fresh", action="store_true", help="re-analyze from the binary")
 
-    cmd("sessions", help="list workers (alias: ps)")
+    cmd("sessions", help="list workers")
     sp = cmd("close", help="shut a worker down")
     sp.add_argument("--no-save", dest="no_save", action="store_true")
     sp.add_argument("--kill", action="store_true", help="TerminateProcess (wedged worker)")
@@ -139,7 +149,7 @@ def build_parser():
     cmd("save", help="persist the .i64 now")
     cmd("doctor", help="probe the environment")
 
-    cmd("segments", help="segments + rwx (alias: seg)")
+    cmd("segments", help="segments + rwx")
     for name, helptext in (("funcs", "functions"), ("imports", "imports"),
                            ("exports", "entry points"), ("strings", "strings")):
         sp = cmd(name, help=helptext)
@@ -149,7 +159,7 @@ def build_parser():
     sp = cmd("nearest", help="nearest symbol to addr (alias: ln)")
     sp.add_argument("addr")
 
-    sp = cmd("disas", help="disassemble a function or N insns (alias: u)")
+    sp = cmd("disas", help="disassemble N insns from target (alias: u; uf=whole function)")
     sp.add_argument("target")
     sp = cmd("decompile", help="pseudocode (alias: dec)")
     sp.add_argument("func")
@@ -159,24 +169,29 @@ def build_parser():
     sp = cmd("string", help="read a string (aliases: da/du)")
     sp.add_argument("addr")
     sp.add_argument("-e", "--encoding", choices=("ascii", "utf16"), default=None)
+    sp = cmd("pointers", help="dump pointers + nearest symbol (aliases: dps/dqs)")
+    sp.add_argument("addr")
+    sp = cmd("string_struct", help="counted string struct (ds=ANSI_STRING, dS=UNICODE_STRING)")
+    sp.add_argument("addr")
 
-    for name in ("xref_to", "xref_from"):
-        sp = cmd(name, help="cross-references")
-        sp.add_argument("addr")
+    sp = cmd("xrefs", help="cross-references to/from addr (aliases: xref_to/xref_from)")
+    sp.add_argument("addr")
+    sp.add_argument("-d", "--direction", choices=("to", "from", "both"), default=None)
     sp = cmd("calls", help="callers + callees")
     sp.add_argument("func")
-    sp = cmd("search", help="search bytes/imm/str/ref")
+    sp.add_argument("--depth", type=int, default=1, help="expand callers upward N levels")
+    sp = cmd("strrefs", help="xrefs to strings matching a pattern")
+    sp.add_argument("pattern")
+    sp = cmd("search", help="search bytes/imm/str/ref (alias: s)")
     sp.add_argument("pattern")
     sp.add_argument("-k", "--kind", choices=("bytes", "imm", "str", "ref"), default="bytes")
 
-    sp = cmd("type", help="inspect a type (alias: t)")
+    sp = cmd("type", help="type def / value overlay / type-of an address (aliases: dt/struct)")
     sp.add_argument("name")
+    sp.add_argument("addr", nargs="?", default=None)
     sp = cmd("types", help="list/search local types")
     sp.add_argument("pattern", nargs="?", default=None)
     sp.add_argument("-k", "--kind", default=None)
-    sp = cmd("struct", help="struct layout (+ values if addr)")
-    sp.add_argument("type")
-    sp.add_argument("addr", nargs="?", default=None)
     sp = cmd("member", help="member at byte offset (nested path, union arms)")
     sp.add_argument("type")
     sp.add_argument("member_offset", metavar="byte_off")
@@ -191,12 +206,21 @@ def build_parser():
     sp = cmd("comment", help="set a comment [mut]")
     sp.add_argument("addr")
     sp.add_argument("text")
+    sp = cmd("op", help="set operand display: hex/dec/oct/bin/char/num/enum:NAME [mut]")
+    sp.add_argument("addr")
+    sp.add_argument("fmt", metavar="<hex|dec|oct|bin|char|num|enum:NAME>")
+    sp.add_argument("opnum", nargs="?", type=int, default=None)
     sp = cmd("declare", help='create types: "<C>" | --file P | @P [mut]')
     sp.add_argument("decl", nargs="?", default=None)
     sp.add_argument("--file", default=None)
     sp = cmd("settype", help="apply a type [mut]")
     sp.add_argument("target")
     sp.add_argument("type")
+    sp = cmd("setlvar", help="rename and/or retype a Hex-Rays local in one step [mut]")
+    sp.add_argument("func")
+    sp.add_argument("var")
+    sp.add_argument("--name", default=None)
+    sp.add_argument("--type", dest="type", default=None)
     sp = cmd("setmember", help="edit a struct member [mut]")
     sp.add_argument("type")
     sp.add_argument("member")
@@ -271,25 +295,32 @@ def build_request(ns):
     if c == "nearest":
         return c, {"addr": ns.addr}
     if c == "disas":
-        return c, {"target": ns.target, **_page(ns)}
+        args = {"target": ns.target, **_page(ns)}
+        if getattr(ns, "whole", None):
+            args["whole"] = True
+        return c, args
     if c == "decompile":
         return c, {"func": ns.func, **_page(ns)}
     if c == "read":
         return c, {"addr": ns.addr, "width": ns.width or 1, **_page(ns)}
     if c == "string":
         return c, {"addr": ns.addr, "encoding": ns.encoding}
-    if c in ("xref_to", "xref_from"):
+    if c == "pointers":
         return c, {"addr": ns.addr, **_page(ns)}
+    if c == "string_struct":
+        return c, {"addr": ns.addr, "wide": bool(getattr(ns, "wide", False))}
+    if c == "xrefs":
+        return c, {"addr": ns.addr, "direction": ns.direction or "to", **_page(ns)}
     if c == "calls":
-        return c, {"func": ns.func, **_page(ns)}
+        return c, {"func": ns.func, "depth": ns.depth, **_page(ns)}
+    if c == "strrefs":
+        return c, {"pattern": ns.pattern, **_page(ns)}
     if c == "search":
         return c, {"pattern": ns.pattern, "kind": ns.kind, **_page(ns)}
     if c == "type":
-        return c, {"name": ns.name, **_page(ns)}
+        return c, {"name": ns.name, "addr": ns.addr, **_page(ns)}
     if c == "types":
         return c, {"pattern": ns.pattern, "kind": ns.kind, **_lpage(ns)}
-    if c == "struct":
-        return c, {"type": ns.type, "addr": ns.addr, **_page(ns)}
     if c == "member":
         return c, {"type": ns.type, "offset": ns.member_offset, "page_offset": ns.offset, "count": ns.count}
     if c == "typeof":
@@ -300,10 +331,14 @@ def build_request(ns):
         return c, {"addr": ns.addr, "name": ns.name}
     if c == "comment":
         return c, {"addr": ns.addr, "text": ns.text}
+    if c == "op":
+        return c, {"addr": ns.addr, "fmt": ns.fmt, "opnum": ns.opnum}
     if c == "declare":
         return c, {"text": _read_decl(ns)}
     if c == "settype":
         return c, {"target": ns.target, "type": ns.type}
+    if c == "setlvar":
+        return c, {"func": ns.func, "var": ns.var, "name": ns.name, "type": ns.type}
     if c == "setmember":
         return c, {"type": ns.type, "member": ns.member, "new_type": ns.new_type, "new_name": ns.new_name}
     if c == "enum":

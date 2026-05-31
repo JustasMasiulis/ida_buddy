@@ -10,6 +10,11 @@ def _h(value):
     return hex(value) if isinstance(value, int) else str(value)
 
 
+def _th(value):
+    """Compact hex for table cells; command arguments accept bare hex."""
+    return f"{value:x}" if isinstance(value, int) else str(value)
+
+
 def format_open_summary(s, ns=None):
     size = s.get("size", 0)
     lines = [
@@ -39,7 +44,7 @@ def format_segments(result, ns=None):
     if not rows:
         return "(no segments)"
     table = [
-        (r["name"], _h(r["start"]), _h(r["end"]), _h(r["size"]), r["perm"], r.get("class", ""))
+        (r["name"], _th(r["start"]), _th(r["end"]), _th(r["size"]), r["perm"], r.get("class", ""))
         for r in rows
     ]
     return align(table, headers=("NAME", "START", "END", "SIZE", "PERM", "CLASS"),
@@ -59,7 +64,7 @@ def format_funcs(result, ns=None):
     rows = result.get("data", [])
     if not rows:
         return "(no functions)"
-    table = [(_h(r["ea"]), _h(r["size"]), r["name"]) for r in rows]
+    table = [(_th(r["ea"]), _th(r["size"]), r["name"]) for r in rows]
     return align(table, headers=("ADDR", "SIZE", "NAME"), aligns=(">", ">", "<"))
 
 
@@ -67,7 +72,7 @@ def format_names(result, ns=None):
     rows = result.get("data", [])
     if not rows:
         return "(no names)"
-    return align([(_h(r["ea"]), r["name"]) for r in rows], headers=("ADDR", "NAME"),
+    return align([(_th(r["ea"]), r["name"]) for r in rows], headers=("ADDR", "NAME"),
                  aligns=(">", "<"))
 
 
@@ -75,7 +80,7 @@ def format_imports(result, ns=None):
     rows = result.get("data", [])
     if not rows:
         return "(no imports)"
-    table = [(_h(r["ea"]), r.get("module", ""), r["name"]) for r in rows]
+    table = [(_th(r["ea"]), r.get("module", ""), r["name"]) for r in rows]
     return align(table, headers=("ADDR", "MODULE", "NAME"), aligns=(">", "<", "<"))
 
 
@@ -83,7 +88,7 @@ def format_exports(result, ns=None):
     rows = result.get("data", [])
     if not rows:
         return "(no exports)"
-    table = [(_h(r["ea"]), str(r["ordinal"]), r["name"]) for r in rows]
+    table = [(_th(r["ea"]), str(r["ordinal"]), r["name"]) for r in rows]
     return align(table, headers=("ADDR", "ORD", "NAME"), aligns=(">", ">", "<"))
 
 
@@ -91,7 +96,7 @@ def format_strings(result, ns=None):
     rows = result.get("data", [])
     if not rows:
         return "(no strings)"
-    table = [(_h(r["ea"]), str(r["length"]), _oneline(r["text"])) for r in rows]
+    table = [(_th(r["ea"]), str(r["length"]), _oneline(r["text"])) for r in rows]
     return align(table, headers=("ADDR", "LEN", "STRING"), aligns=(">", ">", "<"))
 
 

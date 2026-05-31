@@ -128,21 +128,30 @@ def test_command_flags_override_globals():
         (["disas", "0x401000"], "disas", {"target": "0x401000", "offset": 8, "count": 4}),
         (["decompile", "sub_401000"], "decompile", {"func": "sub_401000", "offset": 8, "count": 4}),
         (["read", "0x401000"], "read", {"addr": "0x401000", "width": 1, "offset": 8, "count": 4}),
-        (["xref_to", "0x401000"], "xref_to", {"addr": "0x401000", "offset": 8, "count": 4}),
-        (["xref_from", "0x401000"], "xref_from", {"addr": "0x401000", "offset": 8, "count": 4}),
-        (["calls", "sub_401000"], "calls", {"func": "sub_401000", "offset": 8, "count": 4}),
+        (["xrefs", "0x401000"], "xrefs", {"addr": "0x401000", "direction": "to", "offset": 8, "count": 4}),
+        (["xref_to", "0x401000"], "xrefs", {"addr": "0x401000", "direction": "to", "offset": 8, "count": 4}),
+        (["xref_from", "0x401000"], "xrefs", {"addr": "0x401000", "direction": "from", "offset": 8, "count": 4}),
+        (["xrefs", "0x401000", "-d", "both"], "xrefs", {"addr": "0x401000", "direction": "both", "offset": 8, "count": 4}),
+        (["calls", "sub_401000"], "calls", {"func": "sub_401000", "depth": 1, "offset": 8, "count": 4}),
+        (["calls", "sub_401000", "--depth", "3"], "calls", {"func": "sub_401000", "depth": 3, "offset": 8, "count": 4}),
+        (["strrefs", "lic"], "strrefs", {"pattern": "lic", "offset": 8, "count": 4}),
+        (["dps", "0x401000"], "pointers", {"addr": "0x401000", "offset": 8, "count": 4}),
+        (["dqs", "0x401000"], "pointers", {"addr": "0x401000", "offset": 8, "count": 4}),
+        (["uf", "sub_401000"], "disas", {"target": "sub_401000", "offset": 8, "count": 4, "whole": True}),
         (
             ["search", "90"],
             "search",
             {"pattern": "90", "kind": "bytes", "offset": 8, "count": 4},
         ),
+        (["s", "90"], "search", {"pattern": "90", "kind": "bytes", "offset": 8, "count": 4}),
         (
             ["types", "GUID"],
             "types",
             {"pattern": "GUID", "kind": None, "offset": 8, "count": 4, "total": False},
         ),
-        (["type", "GUID"], "type", {"name": "GUID", "offset": 8, "count": 4}),
-        (["struct", "GUID"], "struct", {"type": "GUID", "addr": None, "offset": 8, "count": 4}),
+        (["type", "GUID"], "type", {"name": "GUID", "addr": None, "offset": 8, "count": 4}),
+        (["struct", "GUID"], "type", {"name": "GUID", "addr": None, "offset": 8, "count": 4}),
+        (["type", "GUID", "0x1000"], "type", {"name": "GUID", "addr": "0x1000", "offset": 8, "count": 4}),
         (
             ["member", "GUID", "8"],
             "member",
@@ -155,3 +164,35 @@ def test_all_paginated_commands_forward_pagination(argv, expected_cmd, expected_
     cmd, args = _request(["-o", "8", "-n", "4", *argv])
     assert cmd == expected_cmd
     assert args == expected_args
+
+
+def test_string_struct_aliases_carry_width():
+    assert _request(["ds", "0x401000"]) == ("string_struct", {"addr": "0x401000", "wide": False})
+    assert _request(["dS", "0x401000"]) == ("string_struct", {"addr": "0x401000", "wide": True})
+
+
+def test_setlvar_resolution():
+    assert _request(["setlvar", "main", "v0", "--name", "x", "--type", "int"]) == (
+        "setlvar",
+        {"func": "main", "var": "v0", "name": "x", "type": "int"},
+    )
+    assert _request(["setlvar", "main", "v0", "--name", "x"]) == (
+        "setlvar",
+        {"func": "main", "var": "v0", "name": "x", "type": None},
+    )
+
+
+def test_bare_disas_carries_no_whole_flag():
+    assert _request(["u", "sub_401000"]) == ("disas", {"target": "sub_401000", "offset": 0, "count": None})
+    assert _request(["uf", "sub_401000"]) == (
+        "disas",
+        {"target": "sub_401000", "offset": 0, "count": None, "whole": True},
+    )
+
+
+def test_op_resolution():
+    assert _request(["op", "0x401234", "char"]) == ("op", {"addr": "0x401234", "fmt": "char", "opnum": None})
+    assert _request(["op", "0x401234", "enum:Foo", "1"]) == (
+        "op",
+        {"addr": "0x401234", "fmt": "enum:Foo", "opnum": 1},
+    )

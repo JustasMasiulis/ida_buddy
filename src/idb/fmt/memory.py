@@ -35,3 +35,24 @@ def format_read(result, ns=None):
 def format_string(result, ns=None):
     text = result["text"].replace("\r", "\\r").replace("\n", "\\n")
     return f'{result["addr"]:#x}  {result["encoding"]} {result["length"]} bytes  "{text}"'
+
+
+def format_pointers(result, ns=None):
+    rows = result.get("data", [])
+    if not rows:
+        return "(no pointers)"
+    w = result["width"] * 2
+    out = []
+    for r in rows:
+        line = f"{r['ea']:012x}  {r['value']:0{w}x}"
+        if r.get("sym"):
+            line += f"  {r['sym']}" + (f"+{r['off']:#x}" if r.get("off") else "")
+        out.append(line)
+    return "\n".join(out)
+
+
+def format_string_struct(result, ns=None):
+    kind = "UNICODE_STRING" if result["wide"] else "ANSI_STRING"
+    text = (result.get("text") or "").replace("\r", "\\r").replace("\n", "\\n")
+    return (f'{result["addr"]:#x}  {kind} len={result["length"]} '
+            f'max={result["maxlen"]} buf={result["buffer"]:#x}  "{text}"')
