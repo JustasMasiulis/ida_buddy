@@ -23,6 +23,7 @@ from idb.fmt import (
     writes as fmt_writes,
     sessions as fmt_sessions,
     eval as fmt_eval,
+    triage as fmt_triage,
 )
 
 DEFAULT_TIMEOUT = 30.0
@@ -57,6 +58,7 @@ for _alias, (_command, _defaults) in ALIASES.items():
 
 FORMATTERS = {
     "eval": fmt_eval.format_eval,
+    "triage": fmt_triage.format_triage,
     "open_summary": listing.format_open_summary,
     "segments": listing.format_segments,
     "save": listing.format_saved,
@@ -187,6 +189,8 @@ def build_parser():
     sp = cmd("calls", help="callers + callees")
     sp.add_argument("func")
     sp.add_argument("--depth", type=int, default=1, help="expand callers upward N levels")
+    sp = cmd("triage", help="single-function pre-RE summary: callees, groups, SEH, strings")
+    sp.add_argument("func")
     sp = cmd("strrefs", help="xrefs to strings matching a pattern")
     sp.add_argument("pattern")
     sp = cmd("search", help="search bytes/imm/str/ref (alias: s)")
@@ -322,6 +326,8 @@ def build_request(ns):
         return c, {"addr": ns.addr, "direction": ns.direction or "to", **_page(ns)}
     if c == "calls":
         return c, {"func": ns.func, "depth": ns.depth, **_page(ns)}
+    if c == "triage":
+        return c, {"func": ns.func}
     if c == "strrefs":
         return c, {"pattern": ns.pattern, **_page(ns)}
     if c == "search":

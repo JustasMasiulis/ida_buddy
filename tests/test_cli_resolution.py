@@ -198,6 +198,15 @@ def test_op_resolution():
     )
 
 
+def test_triage_resolution_is_unpaginated():
+    assert _request(["triage", "sub_401000"]) == ("triage", {"func": "sub_401000"})
+    # triage is a fixed composite; pagination flags must not leak into the request
+    assert _request(["-o", "8", "-n", "4", "triage", "sub_401000"]) == (
+        "triage",
+        {"func": "sub_401000"},
+    )
+
+
 def test_eval_question_alias_joins_expr():
     assert _request(["?", "main", "+", "0x10"]) == ("eval", {"expr": "main + 0x10", "width": None})
 

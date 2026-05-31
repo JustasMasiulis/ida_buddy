@@ -9,7 +9,7 @@ venv/
 .claude
 .tmp
 
-# IDA databases + test fixtures (generated / third-party binaries)
+# IDA databases (generated). Fixture binaries are tracked via the negations below.
 *.i64
 *.idb
 *.id0
@@ -17,4 +17,6 @@ venv/
 *.id2
 *.nam
 *.til
-tests/fixtures/
+# Ignore fixture *contents* (not the dir) so specific binaries can be re-included.
+tests/fixtures/*
+!tests/fixtures/hvix64.exe

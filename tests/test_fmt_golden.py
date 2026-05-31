@@ -4,6 +4,7 @@ from idb.fmt import sessions as fmt_sessions
 from idb.fmt import xrefs as fmt_xrefs
 from idb.fmt import types as fmt_types
 from idb.fmt import writes as fmt_writes
+from idb.fmt import triage as fmt_triage
 from idb.fmt.columns import align
 
 _SUMMARY = {
@@ -228,6 +229,92 @@ def test_type_value_overlay_format():
 def test_setlvar_format():
     assert fmt_writes.format_setlvar({"target": "main:counter", "kind": "lvar",
                                       "name": "counter", "type": "int"}) == "main:counter : int"
+
+
+def _triage_full():
+    return {
+        "func": "WfpAleAuth", "ea": 0x140012A40, "size": 0x3E0,
+        "proto": "__int64 __fastcall WfpAleAuth(void *, __int64)", "proto_source": "guessed",
+        "callee_count": 3,
+        "callees": [
+            {"ea": 0x140003A10, "name": "sub_140003A10", "size": 0x2C, "callers": 3, "kind": "func", "named": False},
+            {"ea": 0x140001120, "name": "WfpRefCount", "size": 0x18, "callers": 214, "kind": "func", "named": True},
+            {"ea": 0x1400A1010, "name": "ExAllocatePool2", "size": 0, "callers": 803, "kind": "import", "named": True},
+        ],
+        "callees_truncated": False,
+        "groups_down": [{"prefix": "Wfp", "count": 9}, {"prefix": "Ps", "count": 3}],
+        "groups_up": [{"prefix": "Fe", "count": 4}],
+        "groups_truncated": False,
+        "chunks": [{"ea": 0x140013F00, "name": "WfpAleAuth_cold_1"}],
+        "seh": {"handler": "__C_specific_handler", "handler_ea": 0x1400A2000,
+                "via": "unwind", "has_frame": True},
+        "strings": [
+            {"from": 0x140012B00, "str_ea": 0x140012B07, "text": "\\Device\\WfpAle", "kind": "unicode_string"},
+            {"from": 0x140012B50, "str_ea": 0x140012B51, "text": "audit", "kind": "direct"},
+        ],
+        "strings_truncated": False,
+        "arg_types": [
+            {"index": 0, "decl": "void *", "actuals": [{"type": "FOO*", "count": 3}], "member": None},
+            {"index": 1, "decl": "__int64", "actuals": [{"type": "BAR*", "count": 2}, {"type": "_QWORD", "count": 1}],
+             "member": "@0x20"},
+        ],
+        "arg_caller_count": 3, "arg_types_truncated": False,
+    }
+
+
+def test_triage_full_layout():
+    out = fmt_triage.format_triage(_triage_full())
+    assert out.splitlines()[0] == "WfpAleAuth @ 140012a40  size 0x3e0"
+    assert "proto  __int64 __fastcall WfpAleAuth(void *, __int64)  (guessed)" in out
+    assert "callees: 3" in out
+    # callee table uses bare hex and un-named work items float to the top
+    table = out[out.index("callees: 3"):]
+    assert "ADDR" in table and "CALLERS" in table and "KIND" in table
+    assert "0x" not in table.split("strings")[0].split("groups")[0]  # no 0x in the callee table
+    assert "groups  down: Wfp* (9), Ps* (3)   up: Fe* (4)" in out
+    assert "structure" in out and "140013f00 (WfpAleAuth_cold_1)" in out
+    assert "__C_specific_handler  (.pdata unwind, frame)" in out
+    assert "param types: 3 callers" in out
+    assert "a1  __int64  BAR* x2, _QWORD x1   ; @0x20" in out
+    assert 'strings: 2' in out and '"\\Device\\WfpAle"   (unicode_string)' in out
+
+
+def test_triage_unnamed_callee_sorts_first():
+    out = fmt_triage.format_triage(_triage_full())
+    lines = [l for l in out.splitlines() if "func" in l or "import" in l]
+    assert "sub_140003A10" in lines[0]
+
+
+def test_triage_truncation_plus():
+    r = _triage_full()
+    r["callees_truncated"] = True
+    r["strings_truncated"] = True
+    r["arg_types_truncated"] = True
+    r["groups_truncated"] = True
+    out = fmt_triage.format_triage(r)
+    assert "callees: 3+" in out
+    assert "strings: 2+" in out
+    assert "param types: 3+ callers" in out
+    assert out.count("  +") >= 1  # groups line carries the +
+
+
+def test_triage_omits_empty_sections():
+    leaf = {
+        "func": "leaf", "ea": 0x1000, "size": 0x10,
+        "proto": "void leaf()", "proto_source": "tinfo",
+        "callee_count": 0, "callees": [], "callees_truncated": False,
+        "groups_down": [], "groups_up": [], "groups_truncated": False,
+        "chunks": [], "seh": None,
+        "strings": [], "strings_truncated": False,
+        "arg_types": None, "arg_caller_count": 0, "arg_types_truncated": False,
+    }
+    out = fmt_triage.format_triage(leaf)
+    assert "leaf @ 1000  size 0x10" in out
+    assert "callees: 0" in out
+    assert "structure" not in out
+    assert "groups" not in out
+    assert "param types" not in out
+    assert "strings:" not in out
 
 
 def test_op_format():

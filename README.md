@@ -9,6 +9,7 @@ idb dec sub_401000        # decompile (Hex-Rays)
 idb db 0x401000 -n 64     # hexdump 64 bytes
 idb x CreateFile          # find symbols by pattern  (alias for `names`)
 idb xref_to validate_key  # who references this, with instruction context
+idb triage sub_401000     # size up a function before reading it
 idb ? sub_401000 + 0x10   # evaluate an expression (alias for `eval`)
 idb dt GUID                # inspect a type
 idb close                 # save + shut the worker down
@@ -45,6 +46,7 @@ Aliases in parens. `[mut]` mutates the database (creates an undo point).
 | `string <addr>` (`da`/`du`) | read a string (`-e ascii\|utf16`) |
 | `xref_to <addr>` / `xref_from <addr>` | refs + kind + enclosing func + instruction |
 | `calls <func>` | callers + callees |
+| `triage <func>` | one-call pre-RE summary: ranked callees, prefix groups (both call-graph directions), prototype + caller-site arg types, SEH/chunks, referenced strings |
 | `search <pat>` | `-k bytes\|imm\|str\|ref` |
 | `type <name>` (`dt`) / `types [pat]` | inspect / list local types (`-k kind`) |
 | `struct <type> [addr]` | layout (+ live values if addr) |
