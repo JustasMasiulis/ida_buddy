@@ -277,6 +277,24 @@ def test_type_workflow_uses_type_names_from_listing(cli_session):
     assert "byte 0" in member.stdout
 
 
+def test_eval_command_computes_and_resolves(cli_session):
+    env = cli_session["env"]
+
+    res = _run(env, "?", "0n42")
+    assert res.stdout.strip() == "2a  0n42  '*'  8bit"
+    assert res.stderr.strip() == ""
+
+    addr, name = _first_function(env)
+    base = int(addr, 16)
+    out = _run(env, "?", name, "+", "0n4").stdout.strip()
+    assert int(out.split()[0], 16) == base + 4
+
+    bad = _run(env, "?", "definitely_not_a_symbol_zzz", check=False)
+    assert bad.returncode == 1
+    assert bad.stdout == ""
+    assert bad.stderr.strip()
+
+
 def test_safe_mutation_flow_round_trips_with_undo(cli_session):
     env = cli_session["env"]
     addr, original_name = _first_function(env)

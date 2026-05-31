@@ -196,3 +196,11 @@ def test_op_resolution():
         "op",
         {"addr": "0x401234", "fmt": "enum:Foo", "opnum": 1},
     )
+
+
+def test_eval_question_alias_joins_expr():
+    assert _request(["?", "main", "+", "0x10"]) == ("eval", {"expr": "main + 0x10", "width": None})
+
+
+def test_eval_width_flag():
+    assert _request(["eval", "0n42", "-w", "4"]) == ("eval", {"expr": "0n42", "width": 4})

@@ -9,6 +9,7 @@ idb dec sub_401000        # decompile (Hex-Rays)
 idb db 0x401000 -n 64     # hexdump 64 bytes
 idb x CreateFile          # find symbols by pattern  (alias for `names`)
 idb xref_to validate_key  # who references this, with instruction context
+idb ? sub_401000 + 0x10   # evaluate an expression (alias for `eval`)
 idb dt GUID                # inspect a type
 idb close                 # save + shut the worker down
 ```
@@ -36,6 +37,7 @@ Aliases in parens. `[mut]` mutates the database (creates an undo point).
 | `sessions` / `close [--no-save\|--kill\|--all]` / `save` / `doctor` | lifecycle |
 | `segments` | segments + rwx |
 | `funcs [pat]` / `names <pat>` (`x`) / `nearest <addr>` (`ln`) | symbols |
+| `eval <expr>` (`?`) | arithmetic/bitwise calc + name lookup; `+%`/`-%`/`*%` wrap (`-w` width); result as hex / `0n`-dec (signed+unsigned) / ascii |
 | `imports [pat]` / `exports [pat]` / `strings [pat]` | imports / entry points / strings |
 | `disas <target>` (`u`) | whole function, or `-n N` insns from an address |
 | `decompile <func>` (`dec`) | Hex-Rays pseudocode |

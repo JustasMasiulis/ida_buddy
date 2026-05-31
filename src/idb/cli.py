@@ -22,11 +22,13 @@ from idb.fmt import (
     types as fmt_types,
     writes as fmt_writes,
     sessions as fmt_sessions,
+    eval as fmt_eval,
 )
 
 DEFAULT_TIMEOUT = 30.0
 
 ALIASES = {
+    "?": ("eval", {}),
     "u": ("disas", {}),
     "uf": ("disas", {"whole": True}),
     "dec": ("decompile", {}),
@@ -54,6 +56,7 @@ for _alias, (_command, _defaults) in ALIASES.items():
     _ALIASES_BY_COMMAND.setdefault(_command, []).append(_alias)
 
 FORMATTERS = {
+    "eval": fmt_eval.format_eval,
     "open_summary": listing.format_open_summary,
     "segments": listing.format_segments,
     "save": listing.format_saved,
@@ -158,6 +161,10 @@ def build_parser():
     sp.add_argument("pattern", nargs="?", default=None)
     sp = cmd("nearest", help="nearest symbol to addr (alias: ln)")
     sp.add_argument("addr")
+    sp = cmd("eval", help="evaluate an arithmetic/bitwise expression (alias: ?)")
+    sp.add_argument("expr", nargs="+", help="expression; prefix with -- if it starts with '-'")
+    sp.add_argument("-w", "--width", type=int, choices=(1, 2, 4, 8), default=None,
+                    help="byte width for wrapping + signed/display (default: pointer width; auto display)")
 
     sp = cmd("disas", help="disassemble N insns from target (alias: u; uf=whole function)")
     sp.add_argument("target")
@@ -294,6 +301,8 @@ def build_request(ns):
         return c, {"pattern": ns.pattern, **_lpage(ns)}
     if c == "nearest":
         return c, {"addr": ns.addr}
+    if c == "eval":
+        return c, {"expr": " ".join(ns.expr), "width": ns.width}
     if c == "disas":
         args = {"target": ns.target, **_page(ns)}
         if getattr(ns, "whole", None):
