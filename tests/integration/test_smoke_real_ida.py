@@ -167,6 +167,20 @@ def test_strings_nonempty(client):
     assert result["data"] and all("text" in r for r in result["data"])
 
 
+def test_string_on_non_defined_address(client):
+    # Regression: auto-detect `string` on an address that is not a defined string head
+    # used to crash with INTERNAL (get_str_type returns the 0xFFFFFFFF sentinel, which
+    # overflows get_strlit_contents' int32 strtype). It must now fall back to a C read,
+    # yielding either a string or a clean NOT_FOUND — never INTERNAL.
+    strs, _ = ok(client, "strings", {"count": 20})
+    target = next((s for s in strs["data"] if len(s["text"]) >= 4), None)
+    if target is None:
+        pytest.skip("no usable string")
+    for addr in (target["ea"] + 1, _entry_ea(client)):
+        reply = client.call("string", {"addr": hex(addr)})
+        assert protocol.is_ok(reply) or reply["error"]["code"] != protocol.INTERNAL, reply
+
+
 def test_nearest_in_function(client):
     result, _ = ok(client, "nearest", {"addr": hex(_entry_ea(client))})
     assert result["func"] is not None

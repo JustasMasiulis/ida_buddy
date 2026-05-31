@@ -102,7 +102,10 @@ def string(addr, encoding=None):
         strtype = ida_nalt.STRTYPE_C_16
     else:
         strtype = ida_nalt.get_str_type(ea)
-        if strtype is None or strtype < 0:
+        # get_str_type returns 0xFFFFFFFF for an address that is not a defined string;
+        # that sentinel overflows get_strlit_contents' int32 strtype param, so fall back
+        # to a plain C-string read (yielding a clean NOT_FOUND if nothing is there).
+        if strtype is None or not 0 <= strtype <= 0x7FFFFFFF:
             strtype = ida_nalt.STRTYPE_C
         encoding = _string_encoding(strtype)
     raw = ida_bytes.get_strlit_contents(ea, -1, strtype)
