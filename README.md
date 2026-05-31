@@ -9,7 +9,7 @@ idb dec sub_401000        # decompile (Hex-Rays)
 idb db 0x401000 -n 64     # hexdump 64 bytes
 idb x CreateFile          # find symbols by pattern  (alias for `names`)
 idb xref_to validate_key  # who references this, with instruction context
-idb t GUID                # inspect a type
+idb dt GUID                # inspect a type
 idb close                 # save + shut the worker down
 ```
 
@@ -33,8 +33,8 @@ Aliases in parens. `[mut]` mutates the database (creates an undo point).
 | Command | Meaning |
 |---|---|
 | `open [--fresh] <path>` | spawn + analyze, print summary |
-| `sessions` (`ps`) / `close [--no-save\|--kill\|--all]` / `save` / `doctor` | lifecycle |
-| `segments` (`seg`) | segments + rwx |
+| `sessions` / `close [--no-save\|--kill\|--all]` / `save` / `doctor` | lifecycle |
+| `segments` | segments + rwx |
 | `funcs [pat]` / `names <pat>` (`x`) / `nearest <addr>` (`ln`) | symbols |
 | `imports [pat]` / `exports [pat]` / `strings [pat]` | imports / entry points / strings |
 | `disas <target>` (`u`) | whole function, or `-n N` insns from an address |
@@ -44,7 +44,7 @@ Aliases in parens. `[mut]` mutates the database (creates an undo point).
 | `xref_to <addr>` / `xref_from <addr>` | refs + kind + enclosing func + instruction |
 | `calls <func>` | callers + callees |
 | `search <pat>` | `-k bytes\|imm\|str\|ref` |
-| `type <name>` (`t`) / `types [pat]` | inspect / list local types (`-k kind`) |
+| `type <name>` (`dt`) / `types [pat]` | inspect / list local types (`-k kind`) |
 | `struct <type> [addr]` | layout (+ live values if addr) |
 | `member <type> <byte_off>` | member at offset — full nested path, all union arms |
 | `typeof <target>` | type of a global / function / `func:var` local |
