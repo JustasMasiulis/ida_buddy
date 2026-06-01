@@ -202,6 +202,21 @@ def test_type_pattern_with_addr_is_rejected():
     assert ei.value.code == protocol.BAD_ARGS
 
 
+def test_force_utf8_reconfigures_stream():
+    captured = {}
+
+    class Stream:
+        def reconfigure(self, **kwargs):
+            captured.update(kwargs)
+
+    cli._force_utf8(Stream())
+    assert captured["encoding"] == "utf-8"
+
+
+def test_force_utf8_tolerates_stream_without_reconfigure():
+    cli._force_utf8(object())
+
+
 def test_string_struct_aliases_carry_width():
     assert _request(["ds", "0x401000"]) == ("string_struct", {"addr": "0x401000", "wide": False})
     assert _request(["dS", "0x401000"]) == ("string_struct", {"addr": "0x401000", "wide": True})

@@ -598,7 +598,22 @@ LIFECYCLE = {
 }
 
 
+def _force_utf8(stream):
+    """idb prints arbitrary binary-derived text (strings, comments, type/symbol
+    names); the host console encoding (cp1252 on Windows) raises on code points
+    outside it. UTF-8 encodes every code point, so the round-trip never crashes."""
+    reconfigure = getattr(stream, "reconfigure", None)
+    if reconfigure is None:
+        return
+    try:
+        reconfigure(encoding="utf-8", errors="backslashreplace")
+    except (ValueError, OSError):
+        pass
+
+
 def main(argv=None):
+    _force_utf8(sys.stdout)
+    _force_utf8(sys.stderr)
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv or argv[0] in ("-h", "--help"):
         build_parser().print_help()
