@@ -464,17 +464,34 @@ def setmember(type, member, new_type, new_name=None):
     tif = _named(type)
     if not (tif.is_struct() or tif.is_union()):
         raise IdbError(protocol.BAD_ARGS, f"{type!r} is not a struct or union")
-    idx = _member_index(tif, member)
+    # rename_udm/set_udm_type on a get_named_type() tinfo silently no-op (return
+    # TERR_OK, change nothing) unless a genuine set_udm_type change happens to "prime"
+    # the tinfo first — so a pure rename is lost. Rebuild the UDT and replace the stored
+    # definition instead; that always persists. get_udt_details carries the full layout
+    # (offsets, packing, is_fixed, member comments) so create_udt reproduces it exactly.
+    def_name = tif.get_final_type_name()
+    target = _named(def_name)
+    idx = _member_index(target, member)
     if idx < 0:
         raise IdbError(protocol.NOT_FOUND, f"no member {member!r} in {type!r}")
-    code = tif.set_udm_type(idx, _parse_type(new_type))
-    if code != T.TERR_OK:
-        raise IdbError(protocol.IDA_ERROR, f"set_udm_type failed: {T.tinfo_errstr(code)}")
+    udt = T.udt_type_data_t()
+    if not target.get_udt_details(udt):
+        raise IdbError(protocol.IDA_ERROR, f"could not read members of {type!r}")
+    type_cmt = target.get_type_cmt()
+    repeatable = bool(target.get_type_rptcmt())
+    udt[idx].type = _parse_type(new_type)
     if new_name:
-        code = tif.rename_udm(idx, new_name)
-        if code != T.TERR_OK:
-            raise IdbError(protocol.IDA_ERROR, f"rename_udm failed: {T.tinfo_errstr(code)}")
-    _, m = tif.get_udm(idx)
+        udt[idx].name = new_name
+    rebuilt = T.tinfo_t()
+    if not rebuilt.create_udt(udt, T.BTF_UNION if target.is_union() else T.BTF_STRUCT):
+        raise IdbError(protocol.IDA_ERROR, f"could not rebuild {def_name!r}")
+    if type_cmt:
+        rebuilt.set_type_cmt(type_cmt, not repeatable)
+    code = rebuilt.set_named_type(idahelp.til(), def_name, T.NTF_REPLACE)
+    if code != T.TERR_OK:
+        raise IdbError(protocol.IDA_ERROR, f"set_named_type failed: {T.tinfo_errstr(code)}")
+    back = _named(type)
+    _, m = back.get_udm(idx)
     return {"type": type, "index": idx, "name": m.name, "member_type": str(m.type)}
 
 

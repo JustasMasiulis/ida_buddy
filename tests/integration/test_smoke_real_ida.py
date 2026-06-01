@@ -365,6 +365,31 @@ def test_declare_then_setmember(client):
     assert any(m["name"] == "aa" and m["type"] == "unsigned int" for m in typ2["members"])
 
 
+def test_setmember_pure_rename_type_unchanged(client):
+    # Regression: renaming a member WITHOUT changing its type used to silently no-op
+    # (rename_udm returns TERR_OK but persists nothing unless a real set_udm_type change
+    # rides along). Mirrors the exact reported repro, including the typedef indirection.
+    ok(client, "declare", {"text": "typedef struct _SM_REPRO { void *old_name; } SM_REPRO;"})
+    res, _ = ok(client, "setmember",
+                {"type": "SM_REPRO", "member": "old_name", "new_type": "void *", "new_name": "new_name"})
+    assert res["name"] == "new_name"
+    typ, _ = ok(client, "type", {"name": "SM_REPRO"})
+    names = [m["name"] for m in typ["members"]]
+    assert "new_name" in names and "old_name" not in names
+    # the alias must remain a typedef onto its struct, not be clobbered into one
+    assert typ["kind"] in ("struct", "union")
+
+
+def test_setmember_rename_by_offset(client):
+    ok(client, "declare", {"text": "struct SM_OFF { void *first; int second; };"})
+    ok(client, "setmember",
+       {"type": "SM_OFF", "member": "0x0", "new_type": "void *", "new_name": "renamed_first"})
+    typ, _ = ok(client, "type", {"name": "SM_OFF"})
+    by_off = {m["offset"]: m["name"] for m in typ["members"]}
+    assert by_off[0] == "renamed_first"
+    assert any(m["name"] == "second" for m in typ["members"])
+
+
 def test_enum_create(client):
     ok(client, "enum", {"name": "IDB_ENUM", "members": "X=1,Y=2,Z=7", "bitfield": False})
     typ, _ = ok(client, "type", {"name": "IDB_ENUM"})
