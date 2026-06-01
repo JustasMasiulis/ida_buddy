@@ -48,8 +48,7 @@ Aliases in parens. `[mut]` mutates the database (creates an undo point).
 | `calls <func>` | callers + callees |
 | `triage <func>` | one-call pre-RE summary: ranked callees, prefix groups (both call-graph directions), prototype + caller-site arg types, SEH/chunks, referenced strings |
 | `search <pat>` | `-k bytes\|imm\|str\|ref` |
-| `type <name>` (`dt`) / `types [pat]` | inspect / list local types (`-k kind`) |
-| `struct <type> [addr]` | layout (+ live values if addr) |
+| `type <name> [addr]` (`dt`) / `types [pat]` | resolve a type (local/library), overlay live values at addr, or search both — `-e`, `-k kind`, `--size N` |
 | `member <type> <byte_off>` | member at offset — full nested path, all union arms |
 | `typeof <target>` | type of a global / function / `func:var` local |
 | `frame <func>` | stack / local variables |

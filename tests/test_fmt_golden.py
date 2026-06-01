@@ -122,6 +122,18 @@ def test_type_members_format():
     assert "struct GUID" in out and "Data1" in out and "unsigned int" in out
 
 
+def test_types_empty_and_table():
+    assert fmt_types.format_types({"data": []}) == "(no matching types)"
+    out = fmt_types.format_types({"data": [
+        {"name": "GUID", "kind": "struct", "size": 16, "src": "local"},
+        {"name": "IMAGE_DOS_HEADER", "kind": "struct", "size": 64, "src": "ntddk.til"},
+    ]})
+    lines = out.splitlines()
+    assert lines[0].split() == ["SRC", "KIND", "SIZE", "NAME"]
+    assert "local" in out and "ntddk.til" in out and "GUID" in out
+    assert "0x10" in out
+
+
 def test_member_paths_format():
     result = {"type": "GUID", "offset": 8,
               "paths": [{"path": "Data4[0]", "type": "unsigned __int8", "size": 1}]}

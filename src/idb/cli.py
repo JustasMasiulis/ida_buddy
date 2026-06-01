@@ -46,7 +46,7 @@ ALIASES = {
     "x": ("names", {}),
     "ln": ("nearest", {}),
     "dt": ("type", {}),
-    "struct": ("type", {}),
+    "types": ("type", {"enumerate": True}),
     "s": ("search", {}),
     "xref_to": ("xrefs", {"direction": "to"}),
     "xref_from": ("xrefs", {"direction": "from"}),
@@ -110,143 +110,227 @@ _GLOBAL_DEFAULTS = {
 }
 
 
-def _global_flags():
+_PAGE_UNITS = {
+    "segments": "rows (default: all)",
+    "funcs": "rows (default 200)", "imports": "rows (default 200)",
+    "exports": "rows (default 200)", "strings": "rows (default 200)",
+    "names": "rows (default 200)",
+    "disas": "instructions (default 32; whole-func cap 2048)",
+    "decompile": "lines (default: all)",
+    "read": "cells (default 64 B at width 1, else 16)",
+    "pointers": "pointers (default 16)", "xrefs": "rows (default 200)",
+    "calls": "callers (default 200)", "strrefs": "rows (default 200)",
+    "search": "matches (default 200)", "type": "members (resolve) / rows (search, default 300)",
+    "member": "paths (default: all)", "frame": "variables (default: all)",
+    "sessions": "rows", "doctor": "rows",
+}
+_TOTAL_CMDS = frozenset({"segments", "funcs", "imports", "exports", "strings", "names", "type"})
+
+
+def _session_flags():
     g = argparse.ArgumentParser(add_help=False)
     g.add_argument("-s", "--session", default=argparse.SUPPRESS,
                    help="session id (see `idb sessions`)")
     g.add_argument("--idb", default=argparse.SUPPRESS,
                    help="resolve the session by database/binary path")
+    g.add_argument("-t", "--timeout", type=float, default=argparse.SUPPRESS,
+                   help="client wait, seconds")
+    g.add_argument("-v", "--verbose", action="count", default=argparse.SUPPRESS,
+                   help="more detail on stderr")
+    return g
+
+
+def _global_flags():
+    g = _session_flags()
     g.add_argument("-o", "--offset", type=int, default=argparse.SUPPRESS,
                    help="pagination offset")
     g.add_argument("-n", "--count", type=int, default=argparse.SUPPRESS,
                    help="item/insn/cell count")
-    g.add_argument("-t", "--timeout", type=float, default=argparse.SUPPRESS,
-                   help="client wait, seconds")
     g.add_argument("--total", action="store_true", default=argparse.SUPPRESS,
                    help="compute total counts when possible")
-    g.add_argument("-v", "--verbose", action="count", default=argparse.SUPPRESS)
     return g
 
 
+def _add_flags(sp, name):
+    paged = name in _PAGE_UNITS
+    sp.add_argument("-o", "--offset", type=int, default=argparse.SUPPRESS,
+                    help="pagination offset" if paged else argparse.SUPPRESS)
+    sp.add_argument("-n", "--count", type=int, default=argparse.SUPPRESS,
+                    help=_PAGE_UNITS[name] if paged else argparse.SUPPRESS)
+    sp.add_argument("--total", action="store_true", default=argparse.SUPPRESS,
+                    help="also report the full count (extra scan)"
+                         if name in _TOTAL_CMDS else argparse.SUPPRESS)
+
+
+_ROOT_DESCRIPTION = (
+    "IDA Pro Buddy - drive a headless IDA session from the shell. Each call resolves a worker "
+    "and does one RPC round-trip; open a database first with `idb open <file>`, then target it "
+    "with -s/--idb (defaults to the most-recent session). WinDbg-style aliases "
+    "(u, dec, db/dw/dd/dq, da/du, x, ln, dt, s) are recommended."
+)
+_ROOT_EPILOG = (
+    "conventions:\n"
+    "  addresses    0x401000, a name (sub_401000), or an expression\n"
+    "  pagination   -o/--offset + -n/--count; a [+more; resume with -o N] hint prints to stderr;\n"
+    "               --total adds full counts where supported (see each command's -h)\n"
+    "  mutations    [mut] commands modify the database; undo/redo revert them"
+)
+
+
 def build_parser():
-    root_globals = _global_flags()
-    command_globals = _global_flags()
+    command_globals = _session_flags()
     p = argparse.ArgumentParser(
         prog="idb",
-        description="IDA Pro Buddy",
-        parents=[root_globals],
+        description=_ROOT_DESCRIPTION,
+        epilog=_ROOT_EPILOG,
+        parents=[_global_flags()],
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     sub = p.add_subparsers(dest="command", required=True, metavar="<command>")
 
-    def cmd(name, **kw):
+    def cmd(name, help=None, ex=None, **kw):
         aliases = _ALIASES_BY_COMMAND.get(name, ())
-        return sub.add_parser(name, parents=[command_globals], aliases=aliases, **kw)
+        epilog = "examples:\n" + "\n".join("  idb " + e for e in ex) if ex else None
+        sp = sub.add_parser(name, parents=[command_globals], aliases=aliases, help=help,
+                            description=help, epilog=epilog,
+                            formatter_class=argparse.RawDescriptionHelpFormatter, **kw)
+        _add_flags(sp, name)
+        return sp
 
-    sp = cmd("open", help="spawn+analyze a binary/db and print a summary")
+    sp = cmd("open", help="spawn+analyze a binary/db and print a summary",
+             ex=(r"open C:\bins\foo.exe", "open foo.exe --fresh"))
     sp.add_argument("target")
     sp.add_argument("--fresh", action="store_true", help="re-analyze from the binary")
 
-    cmd("sessions", help="list workers")
-    sp = cmd("close", help="shut a worker down")
+    cmd("sessions", help="list workers", ex=("sessions",))
+    sp = cmd("close", help="shut a worker down", ex=("close", "close --all --no-save"))
     sp.add_argument("--no-save", dest="no_save", action="store_true")
     sp.add_argument("--kill", action="store_true", help="TerminateProcess (wedged worker)")
     sp.add_argument("--all", action="store_true")
-    cmd("save", help="persist the .i64 now")
-    cmd("doctor", help="probe the environment")
+    cmd("save", help="persist the .i64 now", ex=("save",))
+    cmd("doctor", help="probe the environment", ex=("doctor",))
 
-    cmd("segments", help="segments + rwx")
-    for name, helptext in (("funcs", "functions"), ("imports", "imports"),
-                           ("exports", "entry points"), ("strings", "strings")):
-        sp = cmd(name, help=helptext)
+    cmd("segments", help="segments + rwx", ex=("segments --total",))
+    for name, helptext, example in (
+        ("funcs", "functions", "funcs Create -n 50 --total"),
+        ("imports", "imports", "imports kernel32"),
+        ("exports", "entry points", "exports"),
+        ("strings", "strings", "strings lic -n 100"),
+    ):
+        sp = cmd(name, help=helptext, ex=(example,))
         sp.add_argument("pattern", nargs="?", default=None)
-    sp = cmd("names", help="symbols by pattern (alias: x)")
+    sp = cmd("names", help="symbols by pattern (alias: x)", ex=("names CreateFile", "x sub_"))
     sp.add_argument("pattern", nargs="?", default=None)
-    sp = cmd("nearest", help="nearest symbol to addr (alias: ln)")
+    sp = cmd("nearest", help="nearest symbol to addr (alias: ln)", ex=("nearest 0x401037", "ln 0x401037"))
     sp.add_argument("addr")
-    sp = cmd("eval", help="evaluate an arithmetic/bitwise expression (alias: ?)")
+    sp = cmd("eval", help="evaluate an arithmetic/bitwise expression (alias: ?)",
+             ex=("eval (1<<12) - 1", "? 0x401000 + 8"))
     sp.add_argument("expr", nargs="+", help="expression; prefix with -- if it starts with '-'")
     sp.add_argument("-w", "--width", type=int, choices=(1, 2, 4, 8), default=None,
                     help="byte width for wrapping + signed/display (default: pointer width; auto display)")
 
-    sp = cmd("disas", help="disassemble N insns from target (alias: u; uf=whole function)")
+    sp = cmd("disas", help="disassemble N insns from target (alias: u; uf=whole function)",
+             ex=("disas sub_401000 -n 16", "uf 0x401000"))
     sp.add_argument("target")
-    sp = cmd("decompile", help="pseudocode (alias: dec)")
+    sp = cmd("decompile", help="pseudocode (alias: dec)", ex=("decompile sub_401000", "dec main"))
     sp.add_argument("func")
-    sp = cmd("read", help="dump cells (aliases: db/dw/dd/dq)")
+    sp = cmd("read", help="dump cells (aliases: db/dw/dd/dq)", ex=("read 0x140001000 -n 64", "dq 0x140001000 -n 8"))
     sp.add_argument("addr")
     sp.add_argument("-w", "--width", type=int, choices=(1, 2, 4, 8), default=None)
-    sp = cmd("string", help="read a string (aliases: da/du)")
+    sp = cmd("string", help="read a string (aliases: da/du)", ex=("da 0x140003000", "du 0x140003000"))
     sp.add_argument("addr")
     sp.add_argument("-e", "--encoding", choices=("ascii", "utf16"), default=None)
-    sp = cmd("pointers", help="dump pointers + nearest symbol (aliases: dps/dqs)")
+    sp = cmd("pointers", help="dump pointers + nearest symbol (aliases: dps/dqs)",
+             ex=("dps 0x140005000 -n 8",))
     sp.add_argument("addr")
-    sp = cmd("string_struct", help="counted string struct (ds=ANSI_STRING, dS=UNICODE_STRING)")
+    sp = cmd("string_struct", help="counted string struct (ds=ANSI_STRING, dS=UNICODE_STRING)",
+             ex=("ds 0x140006000", "dS 0x140006000"))
     sp.add_argument("addr")
 
-    sp = cmd("xrefs", help="cross-references to/from addr (aliases: xref_to/xref_from)")
+    sp = cmd("xrefs", help="cross-references to/from addr (aliases: xref_to/xref_from)",
+             ex=("xref_to 0x401000", "xrefs 0x401000 -d both"))
     sp.add_argument("addr")
     sp.add_argument("-d", "--direction", choices=("to", "from", "both"), default=None)
-    sp = cmd("calls", help="callers + callees")
+    sp = cmd("calls", help="callers + callees", ex=("calls sub_401000", "calls main --depth 3"))
     sp.add_argument("func")
     sp.add_argument("--depth", type=int, default=1, help="expand callers upward N levels")
-    sp = cmd("triage", help="single-function pre-RE summary: callees, groups, SEH, strings")
+    sp = cmd("triage", help="single-function pre-RE summary: callees, groups, SEH, strings",
+             ex=("triage sub_401000",))
     sp.add_argument("func")
-    sp = cmd("strrefs", help="xrefs to strings matching a pattern")
+    sp = cmd("strrefs", help="xrefs to strings matching a pattern", ex=("strrefs license",))
     sp.add_argument("pattern")
-    sp = cmd("search", help="search bytes/imm/str/ref (alias: s)")
+    sp = cmd("search", help="search bytes/imm/str/ref (alias: s)",
+             ex=("search 90 90 -k bytes", 's GetProcAddress -k str'))
     sp.add_argument("pattern")
     sp.add_argument("-k", "--kind", choices=("bytes", "imm", "str", "ref"), default="bytes")
 
-    sp = cmd("type", help="type def / value overlay / type-of an address (aliases: dt/struct)")
-    sp.add_argument("name")
-    sp.add_argument("addr", nargs="?", default=None)
-    sp = cmd("types", help="list/search local types")
-    sp.add_argument("pattern", nargs="?", default=None)
-    sp.add_argument("-k", "--kind", default=None)
-    sp = cmd("member", help="member at byte offset (nested path, union arms)")
+    sp = cmd("type",
+             help="resolve/overlay a named type, type-of an address, or search types "
+                  "(alias: dt; types forces search)",
+             ex=("type GUID", "dt _EPROCESS 0x140008000",
+                 "types -k struct", "type 'IMAGE_*' --size 0x10", "type -e"))
+    sp.add_argument("name", nargs="?", default=None,
+                    help="type name to resolve, or a search pattern in list mode")
+    sp.add_argument("addr", nargs="?", default=None, help="overlay address (resolve mode only)")
+    sp.add_argument("-e", "--enumerate", action="store_true", default=argparse.SUPPRESS,
+                    help="list/search types instead of resolving one")
+    sp.add_argument("-k", "--kind", default=None,
+                    help="filter by kind (struct/union/enum/pointer/function/array/typedef/scalar)")
+    sp.add_argument("--size", default=None,
+                    help="filter by type size in bytes (decimal, or 0x-prefixed hex)")
+    sp = cmd("member", help="member at byte offset (nested path, union arms)",
+             ex=("member _EPROCESS 0x2e0",))
     sp.add_argument("type")
     sp.add_argument("member_offset", metavar="byte_off")
-    sp = cmd("typeof", help="type of a global/local/stack-var/function")
+    sp = cmd("typeof", help="type of a global/local/stack-var/function",
+             ex=("typeof 0x140008000", "typeof sub_401000:v3"))
     sp.add_argument("target")
-    sp = cmd("frame", help="stack/local variables")
+    sp = cmd("frame", help="stack/local variables", ex=("frame sub_401000",))
     sp.add_argument("func")
 
-    sp = cmd("rename", help="rename func/global/local/stack [mut]")
+    sp = cmd("rename", help="rename func/global/local/stack [mut]",
+             ex=("rename 0x401000 parse_header", "rename sub_401000:v3 count"))
     sp.add_argument("addr")
     sp.add_argument("name")
-    sp = cmd("comment", help="set a comment [mut]")
+    sp = cmd("comment", help="set a comment [mut]", ex=('comment 0x401037 "loop start"',))
     sp.add_argument("addr")
     sp.add_argument("text")
-    sp = cmd("op", help="set operand display: hex/dec/oct/bin/char/num/enum:NAME [mut]")
+    sp = cmd("op", help="set operand display: hex/dec/oct/bin/char/num/enum:NAME [mut]",
+             ex=("op 0x401234 dec", "op 0x401234 enum:MyFlags 1"))
     sp.add_argument("addr")
     sp.add_argument("fmt", metavar="<hex|dec|oct|bin|char|num|enum:NAME>")
     sp.add_argument("opnum", nargs="?", type=int, default=None)
-    sp = cmd("declare", help='create types: "<C>" | --file P | @P [mut]')
+    sp = cmd("declare", help='create types: "<C>" | --file P | @P [mut]',
+             ex=('declare "struct Foo { int a; char b; };"', "declare @types.h"))
     sp.add_argument("decl", nargs="?", default=None)
     sp.add_argument("--file", default=None)
-    sp = cmd("settype", help="apply a type [mut]")
+    sp = cmd("settype", help="apply a type [mut]",
+             ex=("settype 0x140008000 GUID", "settype sub_401000:v3 int"))
     sp.add_argument("target")
     sp.add_argument("type")
-    sp = cmd("setlvar", help="rename and/or retype a Hex-Rays local in one step [mut]")
+    sp = cmd("setlvar", help="rename and/or retype a Hex-Rays local in one step [mut]",
+             ex=("setlvar main v0 --name count --type int",))
     sp.add_argument("func")
     sp.add_argument("var")
     sp.add_argument("--name", default=None)
     sp.add_argument("--type", dest="type", default=None)
-    sp = cmd("setmember", help="edit a struct member [mut]")
+    sp = cmd("setmember", help="edit a struct member [mut]",
+             ex=("setmember Foo a int count",))
     sp.add_argument("type")
     sp.add_argument("member")
     sp.add_argument("new_type")
     sp.add_argument("new_name", nargs="?", default=None)
-    sp = cmd("enum", help="create/extend an enum [mut]")
+    sp = cmd("enum", help="create/extend an enum [mut]", ex=("enum Color r=0,g=1,b=2",))
     sp.add_argument("name")
     sp.add_argument("members", help="k=v,k=v,...")
     sp.add_argument("--bitfield", action="store_true")
-    sp = cmd("patch", help="patch bytes [mut]")
+    sp = cmd("patch", help="patch bytes [mut]", ex=("patch 0x401037 90 90",))
     sp.add_argument("addr")
     sp.add_argument("hex")
-    cmd("undo", help="revert last mutation [mut]")
-    cmd("redo", help="replay [mut]")
-    sp = cmd("union-select", help="choose a union arm at a usage site [mut]")
+    cmd("undo", help="revert last mutation [mut]", ex=("undo",))
+    cmd("redo", help="replay [mut]", ex=("redo",))
+    sp = cmd("union-select", help="choose a union arm at a usage site [mut]",
+             ex=("union-select 0x401037 arm_name",))
     sp.add_argument("addr")
     sp.add_argument("member")
     return p
@@ -333,9 +417,17 @@ def build_request(ns):
     if c == "search":
         return c, {"pattern": ns.pattern, "kind": ns.kind, **_page(ns)}
     if c == "type":
-        return c, {"name": ns.name, "addr": ns.addr, **_page(ns)}
-    if c == "types":
-        return c, {"pattern": ns.pattern, "kind": ns.kind, **_lpage(ns)}
+        pat = ns.name
+        list_mode = (bool(getattr(ns, "enumerate", None)) or ns.kind or ns.size
+                     or (pat is not None and ("*" in pat or "?" in pat
+                         or (len(pat) >= 2 and pat.startswith("/") and pat.endswith("/")))))
+        if list_mode:
+            if ns.addr is not None:
+                raise IdbError(protocol.BAD_ARGS,
+                               "type search takes a pattern, not an address; drop the second "
+                               "argument or use `type NAME ADDR` to overlay a struct")
+            return "types", {"pattern": pat, "kind": ns.kind, "size": ns.size, **_lpage(ns)}
+        return "type", {"name": pat, "addr": ns.addr, **_page(ns)}
     if c == "member":
         return c, {"type": ns.type, "offset": ns.member_offset, "page_offset": ns.offset, "count": ns.count}
     if c == "typeof":
@@ -519,7 +611,16 @@ def main(argv=None):
         ns = build_parser().parse_args(argv)
     except SystemExit as exc:
         return int(exc.code or 0)
+
+    canonical = ALIASES.get(ns.command, (ns.command, {}))[0]
+    ignored = []
+    if (hasattr(ns, "offset") or hasattr(ns, "count")) and canonical not in _PAGE_UNITS:
+        ignored.append("-o/-n")
+    if hasattr(ns, "total") and canonical not in _TOTAL_CMDS:
+        ignored.append("--total")
     normalize_namespace(ns)
+    if ignored:
+        print(f"idb: warning: {ns.command} ignores {', '.join(ignored)}", file=sys.stderr)
 
     try:
         if ns.command in LIFECYCLE:

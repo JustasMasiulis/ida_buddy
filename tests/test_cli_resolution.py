@@ -2,7 +2,7 @@ import argparse
 
 import pytest
 
-from idb import cli, registry
+from idb import cli, protocol, registry
 from idb.errors import IdbError, NO_SESSION, AMBIGUOUS
 
 
@@ -147,10 +147,40 @@ def test_command_flags_override_globals():
         (
             ["types", "GUID"],
             "types",
-            {"pattern": "GUID", "kind": None, "offset": 8, "count": 4, "total": False},
+            {"pattern": "GUID", "kind": None, "size": None, "offset": 8, "count": 4, "total": False},
+        ),
+        (
+            ["types"],
+            "types",
+            {"pattern": None, "kind": None, "size": None, "offset": 8, "count": 4, "total": False},
+        ),
+        (
+            ["type", "-e"],
+            "types",
+            {"pattern": None, "kind": None, "size": None, "offset": 8, "count": 4, "total": False},
+        ),
+        (
+            ["type", "-k", "struct"],
+            "types",
+            {"pattern": None, "kind": "struct", "size": None, "offset": 8, "count": 4, "total": False},
+        ),
+        (
+            ["type", "--size", "0x10"],
+            "types",
+            {"pattern": None, "kind": None, "size": "0x10", "offset": 8, "count": 4, "total": False},
+        ),
+        (
+            ["type", "IMAGE_*"],
+            "types",
+            {"pattern": "IMAGE_*", "kind": None, "size": None, "offset": 8, "count": 4, "total": False},
+        ),
+        (
+            ["type", "/^IMAGE/"],
+            "types",
+            {"pattern": "/^IMAGE/", "kind": None, "size": None, "offset": 8, "count": 4, "total": False},
         ),
         (["type", "GUID"], "type", {"name": "GUID", "addr": None, "offset": 8, "count": 4}),
-        (["struct", "GUID"], "type", {"name": "GUID", "addr": None, "offset": 8, "count": 4}),
+        (["dt", "GUID"], "type", {"name": "GUID", "addr": None, "offset": 8, "count": 4}),
         (["type", "GUID", "0x1000"], "type", {"name": "GUID", "addr": "0x1000", "offset": 8, "count": 4}),
         (
             ["member", "GUID", "8"],
@@ -164,6 +194,12 @@ def test_all_paginated_commands_forward_pagination(argv, expected_cmd, expected_
     cmd, args = _request(["-o", "8", "-n", "4", *argv])
     assert cmd == expected_cmd
     assert args == expected_args
+
+
+def test_type_pattern_with_addr_is_rejected():
+    with pytest.raises(IdbError) as ei:
+        _request(["type", "IMAGE_*", "0x1000"])
+    assert ei.value.code == protocol.BAD_ARGS
 
 
 def test_string_struct_aliases_carry_width():

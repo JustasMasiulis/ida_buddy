@@ -277,6 +277,45 @@ def test_type_workflow_uses_type_names_from_listing(cli_session):
     assert "byte 0" in member.stdout
 
 
+def _struct_rows(stdout):
+    rows = []
+    for line in stdout.splitlines()[1:]:
+        parts = line.split(maxsplit=3)
+        if len(parts) == 4:
+            rows.append(parts)
+    return rows
+
+
+def test_type_search_includes_library_types(cli_session):
+    env = cli_session["env"]
+    rows = _struct_rows(_run(env, "types", "-k", "struct", "-n", "200").stdout)
+    if not rows:
+        pytest.skip("fixture has no structs with type info")
+    srcs = {r[0] for r in rows}
+    if srcs == {"local"}:
+        pytest.skip("no library .til types loaded for this binary")
+    assert any(s != "local" for s in srcs)
+
+
+def test_type_search_filters_by_size(cli_session):
+    env = cli_session["env"]
+    rows = _struct_rows(_run(env, "types", "-k", "struct", "-n", "50").stdout)
+    if not rows:
+        pytest.skip("fixture has no structs with type info")
+    size = rows[0][2]
+    sized = _struct_rows(_run(env, "type", "-k", "struct", "--size", size, "-n", "100").stdout)
+    assert sized
+    assert all(r[2] == size for r in sized)
+
+
+def test_type_pattern_with_addr_errors(cli_session):
+    env = cli_session["env"]
+    res = _run(env, "type", "IMAGE_*", "0x1000", check=False)
+    assert res.returncode != 0
+    assert res.stdout.strip() == ""
+    assert "search takes a pattern" in res.stderr
+
+
 def test_eval_command_computes_and_resolves(cli_session):
     env = cli_session["env"]
 

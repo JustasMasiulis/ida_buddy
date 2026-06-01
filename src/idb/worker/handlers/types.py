@@ -73,6 +73,11 @@ def _named(name):
     return tif
 
 
+def _parse_int(value):
+    s = str(value)
+    return int(s, 16) if s.lower().startswith("0x") else int(s, 10)
+
+
 @handler("type")
 def type_(name, addr=None, offset=0, count=None):
     tif = T.tinfo_t()
@@ -106,26 +111,78 @@ def type_(name, addr=None, offset=0, count=None):
 
 
 @handler("types")
-def types(pattern=None, kind=None, offset=0, count=None, total=False):
-    til = idahelp.til()
-    pred = idahelp.name_filter(pattern)
+def types(pattern=None, kind=None, size=None, offset=0, count=None, total=False):
+    name_pred = idahelp.name_filter(pattern)
+    want_size = None
+    if size is not None:
+        try:
+            want_size = _parse_int(size)
+        except ValueError:
+            raise IdbError(protocol.BAD_ARGS, f"--size must be an integer: {size!r}")
 
-    def gen():
-        for ordn in range(1, T.get_ordinal_limit(til)):
-            name = T.get_numbered_type_name(til, ordn)
-            if not name or not pred(name):
-                continue
-            tif = T.tinfo_t()
-            if not tif.get_numbered_type(til, ordn):
-                continue
-            k = _kind(tif)
-            if kind and k != kind:
-                continue
-            yield {"ordinal": ordn, "name": name, "kind": k, "size": tif.get_size()}
+    def matches(tif, name):
+        if not name or not name_pred(name):
+            return None
+        k = _kind(tif)
+        if kind and k != kind:
+            return None
+        sz = tif.get_size()
+        if want_size is not None and sz != want_size:
+            return None
+        return k, sz
 
-    items, next_offset = idahelp.paginate(gen(), offset, count if count else _LIST_DEFAULT)
-    total_count = sum(1 for _ in gen()) if total else None
+    filtered = pattern is not None or kind is not None or want_size is not None
+
+    def rows():
+        yield from _iter_local_types(matches)
+        if filtered:
+            yield from _iter_library_types(matches)
+
+    items, next_offset = idahelp.paginate(rows(), offset, count if count else _LIST_DEFAULT)
+    total_count = sum(1 for _ in rows()) if total else None
     return {"data": items}, idahelp.page_meta(items, next_offset, total_count)
+
+
+def _iter_local_types(matches):
+    til = idahelp.til()
+    for ordn in range(1, T.get_ordinal_limit(til)):
+        name = T.get_numbered_type_name(til, ordn)
+        if not name:
+            continue
+        tif = T.tinfo_t()
+        if not tif.get_numbered_type(til, ordn):
+            continue
+        m = matches(tif, name)
+        if m is None:
+            continue
+        kind, size = m
+        yield {"name": name, "kind": kind, "size": size, "src": "local"}
+
+
+def _iter_library_types(matches):
+    """Scan idati's loaded base .til files (mssdk, gnulnx, ...) by name. Each base
+    is guarded so a malformed til skips rather than aborting the whole listing."""
+    root = idahelp.til()
+    for i in range(getattr(root, "nbases", 0)):
+        try:
+            base = root.base(i)
+        except Exception:
+            continue
+        if base is None:
+            continue
+        src = getattr(base, "name", None) or f"til{i}"
+        try:
+            name = T.first_named_type(base, T.NTF_TYPE)
+            while name:
+                tif = T.tinfo_t()
+                if tif.get_named_type(base, name):
+                    m = matches(tif, name)
+                    if m is not None:
+                        kind, size = m
+                        yield {"name": name, "kind": kind, "size": size, "src": src}
+                name = T.next_named_type(base, name, T.NTF_TYPE)
+        except Exception:
+            continue
 
 
 def _read_value(ea, size):
@@ -185,10 +242,7 @@ def _walk(tif, off, prefix, paths, depth=0):
 
 @handler("member")
 def member(type, offset, page_offset=0, count=None):
-    if isinstance(offset, str):
-        off = int(offset, 16) if offset.lower().startswith("0x") else int(offset, 10)
-    else:
-        off = int(offset)
+    off = _parse_int(offset)
     tif = _named(type)
     if not (tif.is_struct() or tif.is_union()):
         raise IdbError(protocol.BAD_ARGS, f"{type!r} is not a struct or union")
@@ -398,12 +452,11 @@ def setlvar(func, var, name=None, type=None):
 
 
 def _member_index(tif, member):
-    s = str(member)
     try:
-        off = int(s, 16) if s.lower().startswith("0x") else int(s, 10)
-        return tif.find_udm(off * 8, T.STRMEM_OFFSET | T.STRMEM_SKIP_GAPS)
+        off = _parse_int(member)
     except ValueError:
-        return tif.find_udm(s)
+        return tif.find_udm(str(member))
+    return tif.find_udm(off * 8, T.STRMEM_OFFSET | T.STRMEM_SKIP_GAPS)
 
 
 @handler("setmember", writes=True)

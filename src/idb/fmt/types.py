@@ -39,9 +39,9 @@ def format_type(result, ns=None):
 def format_types(result, ns=None):
     rows = result.get("data", [])
     if not rows:
-        return "(no types)"
-    table = [(str(r["ordinal"]), r["kind"], f"{r['size']:#x}", r["name"]) for r in rows]
-    return align(table, headers=("ORD", "KIND", "SIZE", "NAME"), aligns=(">", "<", ">", "<"))
+        return "(no matching types)"
+    table = [(r.get("src", "local"), r["kind"], f"{r['size']:#x}", r["name"]) for r in rows]
+    return align(table, headers=("SRC", "KIND", "SIZE", "NAME"), aligns=("<", "<", ">", "<"))
 
 
 def format_member(result, ns=None):
