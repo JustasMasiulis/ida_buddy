@@ -264,3 +264,60 @@ def test_eval_question_alias_joins_expr():
 
 def test_eval_width_flag():
     assert _request(["eval", "0n42", "-w", "4"]) == ("eval", {"expr": "0n42", "width": 4})
+
+
+def _close_ns(argv):
+    return cli.normalize_namespace(cli.build_parser().parse_args(argv))
+
+
+def test_close_positional_sets_session(monkeypatch):
+    captured = {}
+
+    def fake_resolve(ns):
+        captured["session"] = ns.session
+        return {"id": ns.session, "port": 1, "token": "t", "pid": 1}
+
+    monkeypatch.setattr(cli, "resolve_session", fake_resolve)
+    monkeypatch.setattr(cli, "_close_one", lambda *a, **k: "closed")
+    assert cli.cmd_close(_close_ns(["close", "myid"])) == 0
+    assert captured["session"] == "myid"
+
+
+def test_close_matching_s_and_positional_is_allowed(monkeypatch):
+    captured = {}
+
+    def fake_resolve(ns):
+        captured["session"] = ns.session
+        return {"id": ns.session, "port": 1, "token": "t", "pid": 1}
+
+    monkeypatch.setattr(cli, "resolve_session", fake_resolve)
+    monkeypatch.setattr(cli, "_close_one", lambda *a, **k: "closed")
+    assert cli.cmd_close(_close_ns(["-s", "dup", "close", "dup"])) == 0
+    assert captured["session"] == "dup"
+
+
+def test_close_mismatched_s_and_positional_rejected():
+    with pytest.raises(IdbError) as ei:
+        cli.cmd_close(_close_ns(["-s", "a", "close", "b"]))
+    assert ei.value.code == protocol.BAD_ARGS
+
+
+def test_close_positional_with_all_rejected():
+    with pytest.raises(IdbError) as ei:
+        cli.cmd_close(_close_ns(["close", "--all", "x"]))
+    assert ei.value.code == protocol.BAD_ARGS
+
+
+def test_help_alias_prints_root_help(capsys):
+    assert cli.main(["help"]) == 0
+    assert "usage: idb" in capsys.readouterr().out
+
+
+def test_help_alias_with_command_prints_command_help(capsys):
+    assert cli.main(["help", "close"]) == 0
+    assert "idb close" in capsys.readouterr().out
+
+
+def test_help_is_not_a_registered_subcommand():
+    with pytest.raises(SystemExit):
+        cli.build_parser().parse_args(["help"])

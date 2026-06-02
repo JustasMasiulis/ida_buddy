@@ -203,7 +203,10 @@ def build_parser():
     sp.add_argument("--fresh", action="store_true", help="re-analyze from the binary")
 
     cmd("sessions", help="list workers", ex=("sessions",))
-    sp = cmd("close", help="shut a worker down", ex=("close", "close --all --no-save"))
+    sp = cmd("close", help="shut a worker down",
+             ex=("close", "close foo.exe-1a2b3c4d", "close --all --no-save"))
+    sp.add_argument("session_pos", nargs="?", default=None, metavar="session",
+                    help="session id to close (alternative to -s)")
     sp.add_argument("--no-save", dest="no_save", action="store_true")
     sp.add_argument("--kill", action="store_true", help="TerminateProcess (wedged worker)")
     sp.add_argument("--all", action="store_true")
@@ -568,6 +571,14 @@ def _close_one(entry, kill, save, timeout_s=20.0):
 
 
 def cmd_close(ns):
+    if ns.session_pos is not None:
+        if ns.session and ns.session != ns.session_pos:
+            raise IdbError(protocol.BAD_ARGS,
+                           f"close got -s {ns.session!r} and positional {ns.session_pos!r}; "
+                           "pass the session id once")
+        if ns.all:
+            raise IdbError(protocol.BAD_ARGS, "close takes a session id or --all, not both")
+        ns.session = ns.session_pos
     if ns.all:
         targets = registry.list_all()
         if not targets:
@@ -615,6 +626,8 @@ def main(argv=None):
     _force_utf8(sys.stdout)
     _force_utf8(sys.stderr)
     argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == "help":  # hidden alias: `help` -> -h, `help CMD` -> CMD -h
+        argv = [argv[1], "-h"] if len(argv) > 1 else ["-h"]
     if not argv or argv[0] in ("-h", "--help"):
         build_parser().print_help()
         return 0
