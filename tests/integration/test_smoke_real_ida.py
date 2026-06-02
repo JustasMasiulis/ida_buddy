@@ -356,6 +356,58 @@ def test_patch_then_undo_restores(client):
     assert restored["bytes"] == before["bytes"]
 
 
+def _mapped_data_ea(client):
+    """A mapped address in a non-executable segment (falls back to the entry EA)."""
+    segs, _ = ok(client, "segments", {})
+    for s in segs["data"]:
+        if "x" not in s["perm"] and protocol.is_ok(
+                client.call("read", {"addr": hex(s["start"]), "width": 1, "count": 1})):
+            return s["start"]
+    return _entry_ea(client)
+
+
+def test_da_du_redirect_on_counted_string_type(client):
+    # da/du over a *_STRING fail the literal read (the small Length/MaximumLength
+    # header bytes are not a valid NUL-terminated string), so the worker recovers by
+    # detecting the applied type and serving the ds/dS view with a warning. Two structs
+    # differing only in Buffer width exercise both arms; wide-ness is derived from that
+    # width, not the name. The header bytes below are rejected by IDA's string heuristic.
+    ok(client, "declare", {"text": "struct IT_UNI_STRING { unsigned __int16 Length; "
+                                    "unsigned __int16 MaximumLength; unsigned __int16 *Buffer; };"})
+    ok(client, "declare", {"text": "struct IT_ANSI_STRING { unsigned __int16 Length; "
+                                    "unsigned __int16 MaximumLength; char *Buffer; };"})
+    ea = _mapped_data_ea(client)
+    patched = client.call("patch", {"addr": hex(ea), "hex": "08 00 0a 00 00 00 00 00 00 00 00 00 00 00 00 00"})
+    if not protocol.is_ok(patched):
+        pytest.skip(f"could not patch scratch bytes at {ea:#x}: {patched}")
+    for type_name, wide, enc in (("IT_UNI_STRING", True, "utf16"), ("IT_ANSI_STRING", False, "ascii")):
+        applied = client.call("settype", {"target": hex(ea), "type": type_name})
+        if not protocol.is_ok(applied):
+            pytest.skip(f"could not apply {type_name} at {ea:#x}: {applied}")
+        result, meta = ok(client, "string", {"addr": hex(ea), "encoding": enc})
+        assert result.get("redirected_to_struct") is True
+        assert result["wide"] is wide
+        assert {"length", "maxlen", "buffer", "text"} <= set(result)
+        assert meta and "counted-string" in (meta.get("warning") or "")
+
+
+def test_da_du_fallback_to_memory_view(client):
+    # No string literal and not a counted-string struct: windbg-style, da/du still dump
+    # bytes rather than erroring. Header bytes that fail IDA's string heuristic + a plain
+    # int type guarantee both the literal read and the *_STRING probe come up empty.
+    ea = _mapped_data_ea(client)
+    patched = client.call("patch", {"addr": hex(ea), "hex": "08 00 0a 00 00 00 00 00 00 00 00 00 00 00 00 00"})
+    typed = client.call("settype", {"target": hex(ea), "type": "int"})
+    if not (protocol.is_ok(patched) and protocol.is_ok(typed)):
+        pytest.skip(f"could not stage scratch bytes/type at {ea:#x}")
+    for enc in ("ascii", "utf16"):
+        result, meta = ok(client, "string", {"addr": hex(ea), "encoding": enc})
+        assert result.get("raw_fallback") is True
+        assert result["encoding"] == enc
+        assert isinstance(result["bytes"], (bytes, bytearray)) and len(result["bytes"]) > 0
+        assert meta and "showing" in (meta.get("warning") or "")
+
+
 def test_declare_then_setmember(client):
     ok(client, "declare", {"text": "struct IDB_IT { int a; char b; };"})
     typ, _ = ok(client, "type", {"name": "IDB_IT"})

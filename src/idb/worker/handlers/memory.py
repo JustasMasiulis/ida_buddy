@@ -6,6 +6,7 @@ import ida_ida
 import ida_name
 import ida_nalt
 import ida_segment
+import ida_typeinf
 from ida_idaapi import BADADDR
 
 from idb import protocol
@@ -91,6 +92,29 @@ def read(addr, width=1, count=None, offset=0):
             "be": ida_ida.inf_is_be()}
 
 
+def _counted_string_type(ea):
+    """ea typed as an NT counted-string struct (UNICODE_STRING / ANSI_STRING /
+    OEM_STRING / ...): return (type_name, wide). None otherwise. da/du read a
+    NUL-terminated literal, which is garbage over these structs (the first cells
+    are Length/MaximumLength/Buffer), so the caller redirects to the ds/dS reader.
+    Wide-ness comes from the Buffer element width, not the name, so renamed clones
+    are still classified correctly."""
+    tif = ida_typeinf.tinfo_t()
+    if not ida_nalt.get_tinfo(tif, ea):
+        return None
+    name = tif.get_type_name() or ""
+    base = name.lstrip("_").upper()
+    if base != "STRING" and not base.endswith("_STRING"):
+        return None
+    udt = ida_typeinf.udt_type_data_t()
+    if not tif.get_udt_details(udt) or len(udt) < 3:
+        return None
+    length, maxlen, buffer = udt[0].type, udt[1].type, udt[2].type
+    if length.get_size() != 2 or maxlen.get_size() != 2 or not buffer.is_ptr():
+        return None
+    return name, buffer.get_pointed_object().get_size() == 2
+
+
 @handler("string")
 def string(addr, encoding=None):
     ea = idahelp.resolve_target(addr)
@@ -110,7 +134,30 @@ def string(addr, encoding=None):
         encoding = _string_encoding(strtype)
     raw = ida_bytes.get_strlit_contents(ea, -1, strtype)
     if raw is None:
-        raise IdbError(protocol.NOT_FOUND, f"no string literal at {ea:#x}")
+        # The literal read found nothing. A counted-string struct (UNICODE_STRING/
+        # ANSI_STRING/...) reliably lands here -- its small Length/MaximumLength header
+        # bytes are not a valid NUL-terminated literal -- so recover by serving ds/dS.
+        counted = _counted_string_type(ea)
+        if counted is not None:
+            type_name, wide = counted
+            result = string_struct(ea, wide=wide)
+            result["redirected_to_struct"] = True
+            hint = "dS" if wide else "ds"
+            return result, {"warning":
+                            f"{ea:#x} is typed {type_name}, a counted-string struct rather "
+                            f"than a NUL-terminated literal. Showing its contents -- use "
+                            f"`{hint}` to read it directly."}
+        # A windbg da/du shows memory whatever the type, so dump 16 bytes with an
+        # ascii/utf16 side column rather than failing.
+        seg = ida_segment.getseg(ea)
+        seg_end = seg.end_ea if seg else ida_ida.inf_get_max_ea()
+        total = max(0, min(16, seg_end - ea))
+        data = ida_bytes.get_bytes(ea, total)
+        if data is None:
+            data = bytes(total)  # BSS / uninitialized -> zeros
+        return ({"addr": ea, "encoding": encoding, "bytes": data,
+                 "count": len(data), "raw_fallback": True},
+                {"warning": f"no string literal at {ea:#x}; showing {len(data)} bytes"})
     # IDA returns display bytes for string contents, not the raw storage bytes.
     text = raw.decode("utf-8", "replace")
     byte_length = _string_storage_size(ea, strtype, raw)

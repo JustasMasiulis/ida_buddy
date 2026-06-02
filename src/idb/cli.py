@@ -506,6 +506,8 @@ def emit(rpc_cmd, reply, ns):
         print(text)
     meta = reply.get("meta")
     if meta:
+        if meta.get("warning"):
+            print(f"idb: warning: {meta['warning']}", file=sys.stderr)
         line = _banner(meta)
         if line:
             print(line, file=sys.stderr)

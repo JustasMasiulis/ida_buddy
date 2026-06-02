@@ -3,26 +3,38 @@
 _HEXW = 16 * 3 - 1  # "xx xx ... xx" with one byte's space replaced by the hyphen
 
 
-def _hexdump(base, data):
+def _ascii_gutter(chunk):
+    return "".join(chr(b) if 32 <= b < 127 else "." for b in chunk)
+
+
+def _utf16_gutter(chunk):
+    cells = (chunk[i] | (chunk[i + 1] << 8) for i in range(0, len(chunk) - 1, 2))
+    return "".join(chr(cp) if 32 <= cp < 127 else "." for cp in cells)
+
+
+def _hexdump(base, data, gutter=_ascii_gutter):
+    offsets = range(0, len(data), 16)
+    aw = max((len(f"{base + off:x}") for off in offsets), default=1)
     out = []
-    for off in range(0, len(data), 16):
+    for off in offsets:
         chunk = data[off:off + 16]
         hexs = [f"{b:02x}" for b in chunk]
         left = " ".join(hexs[:8])
         right = " ".join(hexs[8:])
         col = (left + "-" + right) if right else left
-        gutter = "".join(chr(b) if 32 <= b < 127 else "." for b in chunk)
-        out.append(f"{base + off:012x}  {col:<{_HEXW}}  {gutter}")
+        out.append(f"{base + off:0{aw}x}  {col:<{_HEXW}}  {gutter(chunk)}")
     return "\n".join(out) if out else "(no bytes)"
 
 
 def _values(base, width, values):
     per_row = max(1, 16 // width)
+    starts = range(0, len(values), per_row)
+    aw = max((len(f"{base + i * width:x}") for i in starts), default=1)
     out = []
-    for i in range(0, len(values), per_row):
+    for i in starts:
         row = values[i:i + per_row]
         cells = " ".join(f"{v:0{width * 2}x}" for v in row)
-        out.append(f"{base + i * width:012x}  {cells}")
+        out.append(f"{base + i * width:0{aw}x}  {cells}")
     return "\n".join(out) if out else "(no values)"
 
 
@@ -33,6 +45,11 @@ def format_read(result, ns=None):
 
 
 def format_string(result, ns=None):
+    if result.get("redirected_to_struct"):  # da/du landed on a *_STRING struct
+        return format_string_struct(result, ns)
+    if result.get("raw_fallback"):  # no string here; windbg-style memory dump
+        gutter = _utf16_gutter if result["encoding"] == "utf16" else _ascii_gutter
+        return _hexdump(result["addr"], result["bytes"], gutter)
     text = result["text"].replace("\r", "\\r").replace("\n", "\\n")
     return f'{result["addr"]:#x}  {result["encoding"]} {result["length"]} bytes  "{text}"'
 
@@ -42,9 +59,10 @@ def format_pointers(result, ns=None):
     if not rows:
         return "(no pointers)"
     w = result["width"] * 2
+    aw = max(len(f"{r['ea']:x}") for r in rows)
     out = []
     for r in rows:
-        line = f"{r['ea']:012x}  {r['value']:0{w}x}"
+        line = f"{r['ea']:0{aw}x}  {r['value']:0{w}x}"
         if r.get("sym"):
             line += f"  {r['sym']}" + (f"+{r['off']:#x}" if r.get("off") else "")
         out.append(line)

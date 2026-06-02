@@ -78,9 +78,16 @@ def test_doctor_table():
 def test_hexdump_layout():
     out = fmt_memory.format_read({"addr": 0x401000, "width": 1, "bytes": bytes(range(16))})
     line = out.splitlines()[0]
-    assert line.startswith("000000401000  ")
+    assert line.startswith("401000  ")  # address not zero-padded beyond its own width
     assert "00 01 02 03 04 05 06 07-08 09 0a 0b 0c 0d 0e 0f" in line
     assert line.endswith("................")
+
+
+def test_hexdump_aligns_multiline_addresses():
+    # Multi-line: addresses pad only to the widest shown so the column lines up.
+    # 0xff0 + 0x30 bytes spans 3 rows and crosses the 3->4 hex-digit boundary.
+    out = fmt_memory.format_read({"addr": 0xFF0, "width": 1, "bytes": bytes(0x30)})
+    assert [line.split()[0] for line in out.splitlines()] == ["0ff0", "1000", "1010"]
 
 
 def test_values_layout():
@@ -187,9 +194,9 @@ def test_pointers_format():
         {"ea": 0x1010, "value": 0x5, "sym": None, "off": 0},
     ]})
     lines = out.splitlines()
-    assert lines[0] == "000000001000  0000000140001300  wmain"
-    assert lines[1] == "000000001008  0000000140001350  wmain+0x50"
-    assert lines[2] == "000000001010  0000000000000005"
+    assert lines[0] == "1000  0000000140001300  wmain"
+    assert lines[1] == "1008  0000000140001350  wmain+0x50"
+    assert lines[2] == "1010  0000000000000005"
     assert fmt_memory.format_pointers({"addr": 0x1000, "width": 8, "data": []}) == "(no pointers)"
 
 
@@ -198,6 +205,35 @@ def test_string_struct_format():
     assert fmt_memory.format_string_struct(wide) == '0x2000  UNICODE_STRING len=8 max=10 buf=0x3000  "kernel32"'
     ansi = {"addr": 0x2000, "wide": False, "length": 3, "maxlen": 4, "buffer": 0x3000, "text": "abc"}
     assert fmt_memory.format_string_struct(ansi) == '0x2000  ANSI_STRING len=3 max=4 buf=0x3000  "abc"'
+
+
+def test_string_redirected_to_struct_renders_struct_view():
+    # da/du on a *_STRING-typed address returns a struct-shaped result tagged for
+    # redirect; format_string must render the ds/dS view, not the literal view.
+    redirected = {"addr": 0x2000, "wide": True, "length": 8, "maxlen": 10,
+                  "buffer": 0x3000, "text": "kernel32", "redirected_to_struct": True}
+    assert fmt_memory.format_string(redirected) == \
+        '0x2000  UNICODE_STRING len=8 max=10 buf=0x3000  "kernel32"'
+
+
+def test_string_raw_fallback_ascii_dump():
+    # No literal: da falls back to a windbg-style 16-byte hexdump with an ascii gutter.
+    data = b"Hello, world!\x00\x01\x02"
+    out = fmt_memory.format_string({"addr": 0x401000, "encoding": "ascii",
+                                    "bytes": data, "raw_fallback": True})
+    line = out.splitlines()[0]
+    assert line.startswith("401000  ")
+    assert "48 65 6c 6c 6f 2c 20 77-6f 72 6c 64 21 00 01 02" in line
+    assert line.endswith("Hello, world!...")
+
+
+def test_string_raw_fallback_utf16_gutter():
+    # du falls back with a utf-16 gutter: the side column decodes 2-byte code units,
+    # so 16 bytes render 8 characters.
+    data = bytes([0x48, 0x00, 0x69, 0x00, 0x21, 0x00, 0x00, 0x00, 0, 0, 0, 0, 0, 0, 0, 0])
+    out = fmt_memory.format_string({"addr": 0x401000, "encoding": "utf16",
+                                    "bytes": data, "raw_fallback": True})
+    assert out.splitlines()[0].endswith("Hi!.....")
 
 
 def test_xrefs_direction_column():

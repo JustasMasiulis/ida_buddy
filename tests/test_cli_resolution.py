@@ -321,3 +321,13 @@ def test_help_alias_with_command_prints_command_help(capsys):
 def test_help_is_not_a_registered_subcommand():
     with pytest.raises(SystemExit):
         cli.build_parser().parse_args(["help"])
+
+
+def test_emit_renders_struct_redirect_and_warns_on_stderr(capsys):
+    result = {"addr": 0x2000, "wide": False, "length": 3, "maxlen": 4,
+              "buffer": 0x3000, "text": "abc", "redirected_to_struct": True}
+    reply = protocol.build_ok(1, result, {"warning": "0x2000 is typed ANSI_STRING; use `ds`"})
+    assert cli.emit("string", reply, _ns()) == 0
+    captured = capsys.readouterr()
+    assert captured.out.strip() == '0x2000  ANSI_STRING len=3 max=4 buf=0x3000  "abc"'
+    assert "idb: warning: 0x2000 is typed ANSI_STRING; use `ds`" in captured.err
