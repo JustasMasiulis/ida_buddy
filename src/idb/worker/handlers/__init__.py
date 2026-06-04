@@ -7,4 +7,5 @@ on its own (e.g. during pure tests) does not pull in any ida_* module.
 
 
 def load_all():
-    from . import info, symbols, disasm, memory, xrefs, types, annotate, eval, triage  # noqa: F401
+    from . import (info, symbols, disasm, memory, xrefs, types, annotate, eval, triage,  # noqa: F401
+                   audit_call_types)

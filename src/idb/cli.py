@@ -24,6 +24,7 @@ from idb.fmt import (
     sessions as fmt_sessions,
     eval as fmt_eval,
     triage as fmt_triage,
+    audit_call_types as fmt_audit,
 )
 
 DEFAULT_TIMEOUT = 30.0
@@ -59,6 +60,7 @@ for _alias, (_command, _defaults) in ALIASES.items():
 FORMATTERS = {
     "eval": fmt_eval.format_eval,
     "triage": fmt_triage.format_triage,
+    "audit_call_types": fmt_audit.format_audit_call_types,
     "open_summary": listing.format_open_summary,
     "segments": listing.format_segments,
     "save": listing.format_saved,
@@ -124,9 +126,11 @@ _PAGE_UNITS = {
     "calls": "callers (default 200)", "strrefs": "rows (default 200)",
     "search": "matches (default 200)", "type": "members (resolve) / rows (search, default 300)",
     "member": "paths (default: all)", "frame": "variables (default: all)",
+    "audit_call_types": "findings (default: all ranked)",
     "sessions": "rows", "doctor": "rows",
 }
-_TOTAL_CMDS = frozenset({"segments", "funcs", "imports", "exports", "strings", "names", "type"})
+_TOTAL_CMDS = frozenset({"segments", "funcs", "imports", "exports", "strings", "names", "type",
+                         "audit_call_types"})
 
 
 def _session_flags():
@@ -262,6 +266,24 @@ def build_parser():
     sp = cmd("triage", help="single-function pre-RE summary: callees, groups, SEH, strings",
              ex=("triage sub_401000",))
     sp.add_argument("func")
+    sp = cmd("audit_call_types",
+             help="global call-graph type audit: params/locals to concretize or that look mislabeled",
+             ex=("audit_call_types", "audit_call_types Wfp -n 30", "audit_call_types --kind locals"))
+    sp.add_argument("scope", nargs="?", default=None,
+                    help="name pattern to narrow the audit (default: whole database)")
+    sp.add_argument("--budget", type=float, default=None, help="wall-clock budget, seconds (default 20)")
+    sp.add_argument("--limit", type=int, default=None, help="max functions to decompile (default 400)")
+    sp.add_argument("--min-sites", dest="min_sites", type=int, default=None,
+                    help="min call sites for a param finding (default 3)")
+    sp.add_argument("--min-callers", dest="min_callers", type=int, default=None,
+                    help="min distinct callers for a param finding (default 2)")
+    sp.add_argument("--no-imports", dest="no_imports", action="store_true",
+                    help="exclude import/library callees from findings")
+    sp.add_argument("--kind", choices=("all", "params", "locals"), default="all",
+                    help="which findings to compute (default all)")
+    sp.add_argument("--all", dest="show_all", action="store_true",
+                    help="drop the evidence thresholds (min sites/callers/agreement); the "
+                         "noise filters (alias/const/placeholder respelling) still apply")
     sp = cmd("strrefs", help="xrefs to strings matching a pattern", ex=("strrefs license",))
     sp.add_argument("pattern")
     sp = cmd("search", help="search bytes/imm/str/ref (alias: s)",
@@ -429,6 +451,12 @@ def build_request(ns):
         return c, {"func": ns.func, "depth": ns.depth, **_page(ns)}
     if c == "triage":
         return c, {"func": ns.func}
+    if c == "audit_call_types":
+        return c, {"scope": ns.scope, "budget": ns.budget, "limit": ns.limit,
+                   "min_sites": ns.min_sites, "min_callers": ns.min_callers,
+                   "no_imports": bool(getattr(ns, "no_imports", False)),
+                   "kind": ns.kind, "show_all": bool(getattr(ns, "show_all", False)),
+                   **_lpage(ns)}
     if c == "strrefs":
         return c, {"pattern": ns.pattern, **_page(ns)}
     if c == "search":

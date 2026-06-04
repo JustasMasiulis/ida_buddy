@@ -21,11 +21,10 @@ import ida_segment
 import ida_typeinf as T
 import ida_xref
 import idautils
-from ida_idaapi import BADADDR
 
 from idb import protocol, triage as pure
 from idb.errors import IdbError
-from idb.worker import idahelp
+from idb.worker import hexcalls, idahelp
 from idb.worker.budget import Budget
 from idb.worker.dispatch import handler
 
@@ -311,74 +310,15 @@ def _graph_prefixes(start, budget):
     return (pure.group_prefixes(down), pure.group_prefixes(up), truncated[0])
 
 
-def _call_target_ea(call_expr):
-    """The ea a cot_call resolves to: the called object's address, peeking through
-    a cast of a function pointer. BADADDR for indirect calls we can't resolve."""
-    import ida_hexrays
-
-    x = call_expr.x
-    if x.op == ida_hexrays.cot_cast:
-        x = x.x
-    if x.op == ida_hexrays.cot_obj:
-        return x.obj_ea
-    return BADADDR
-
-
-def _arg_descriptor(arg):
-    """(type_str, member_note) for one call argument cexpr, looking through an
-    implicit cast to the underlying value and noting member access + offset."""
-    import ida_hexrays
-
-    inner = arg.x if arg.op == ida_hexrays.cot_cast else arg
-    type_str = str(inner.type) if not inner.type.empty() else str(arg.type)
-
-    member = None
-    probe = inner
-    if probe.op == ida_hexrays.cot_ref:
-        probe = probe.x
-    if probe.op in (ida_hexrays.cot_memptr, ida_hexrays.cot_memref):
-        member = f"@{probe.m:#x}"
-    return type_str, member
-
-
-def _call_sites_to(cfunc, target):
-    """Yield the argument list of every call to `target` inside an already-
-    decompiled cfunc. get_pseudocode() must run first: treeitems is empty until
-    the ctext is built (the same ordering union_select relies on)."""
-    import ida_hexrays
-
-    cfunc.get_pseudocode()
-    items = cfunc.treeitems
-    for i in range(items.size()):
-        it = items.at(i)
-        if not it.is_expr():
-            continue
-        e = it.cexpr
-        if e.op != ida_hexrays.cot_call or _call_target_ea(e) != target:
-            continue
-        args = []
-        for idx in range(e.a.size()):
-            try:
-                type_str, member = _arg_descriptor(e.a[idx])
-            except Exception:
-                continue
-            args.append({"index": idx, "type": type_str, "member": member})
-        if args:
-            yield {"args": args}
-
-
 def _harvest_args(start, budget):
     """Decompile callers of `start` (bounded by `budget` and a hard decompile cap)
     and collect the underlying argument types at each call site. Returns
     (arg_types, callers_decompiled, truncated), or (None, 0, False) if Hex-Rays is
     unavailable. A single decompile is ~1s here, so the cap matters as much as the
     clock — we stop once enough sites agree."""
-    try:
-        import ida_hexrays
-    except Exception:
+    if not hexcalls.init():
         return None, 0, False
-    if not ida_hexrays.init_hexrays_plugin():
-        return None, 0, False
+    import ida_hexrays
 
     callers = sorted(_callers(start))
     sites = []
@@ -396,7 +336,7 @@ def _harvest_args(start, budget):
             continue
         done += 1
         try:
-            sites.extend(_call_sites_to(cfunc, start))
+            sites.extend(hexcalls.call_sites(cfunc, caller, target=start))
         except Exception:
             continue
 
