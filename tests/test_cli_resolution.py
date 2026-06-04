@@ -233,6 +233,48 @@ def test_setlvar_resolution():
     )
 
 
+def test_set_member_resolution():
+    assert _request(["set_member", "Foo", "a", "int", "count"]) == (
+        "set_member",
+        {"type": "Foo", "member": "a", "new_type": "int", "new_name": "count"},
+    )
+    assert _request(["set_member", "Foo", "0x4", "int"]) == (
+        "set_member",
+        {"type": "Foo", "member": "0x4", "new_type": "int", "new_name": None},
+    )
+
+
+def test_insert_member_resolution():
+    assert _request(["insert_member", "Foo", "int", "count", "--after", "a"]) == (
+        "insert_member",
+        {"type": "Foo", "new_type": "int", "name": "count", "before": None, "after": "a"},
+    )
+    assert _request(["insert_member", "Foo", "int", "count", "--before", "c"]) == (
+        "insert_member",
+        {"type": "Foo", "new_type": "int", "name": "count", "before": "c", "after": None},
+    )
+    assert _request(["insert_member", "Foo", "void *", "ctx"]) == (
+        "insert_member",
+        {"type": "Foo", "new_type": "void *", "name": "ctx", "before": None, "after": None},
+    )
+
+
+def test_del_member_resolution():
+    assert _request(["del_member", "Foo", "b"]) == (
+        "del_member",
+        {"type": "Foo", "member": "b", "leave_gap": False},
+    )
+    assert _request(["del_member", "Foo", "0x8", "--leave-gap"]) == (
+        "del_member",
+        {"type": "Foo", "member": "0x8", "leave_gap": True},
+    )
+
+
+def test_setmember_is_no_longer_a_command():
+    with pytest.raises(SystemExit):
+        cli.build_parser().parse_args(["setmember", "Foo", "a", "int"])
+
+
 def test_bare_disas_carries_no_whole_flag():
     assert _request(["u", "sub_401000"]) == ("disas", {"target": "sub_401000", "offset": 0, "count": None})
     assert _request(["uf", "sub_401000"]) == (

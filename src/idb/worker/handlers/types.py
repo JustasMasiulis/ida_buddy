@@ -1,7 +1,7 @@
 """types read handlers: type, types, struct, member, typeof, frame.
 
-Type writes (declare/settype/setmember/enum) and the Hex-Rays union-arm selector
-(union-select) live here too.
+Type writes (declare/settype/set_member/insert_member/del_member/enum) and the
+Hex-Rays union-arm selector (union-select) live here too.
 """
 
 import ida_bytes
@@ -459,40 +459,161 @@ def _member_index(tif, member):
     return tif.find_udm(off * 8, T.STRMEM_OFFSET | T.STRMEM_SKIP_GAPS)
 
 
-@handler("setmember", writes=True)
-def setmember(type, member, new_type, new_name=None):
+# In-place mutators (rename_udm/set_udm_type/del_udm/add_udm) on a get_named_type()
+# tinfo silently no-op (return TERR_OK, change nothing) unless a genuine type change
+# happens to "prime" the tinfo first. The reliable path for every member edit is to
+# pull the full UDT, mutate the member vector, rebuild with create_udt, and replace the
+# stored definition with set_named_type(NTF_REPLACE). get_udt_details carries the whole
+# layout (explicit offsets, packing, is_fixed, member comments) and mutating the same
+# udt object in place preserves all of it, so create_udt reproduces the intended layout.
+
+
+def _load_writable_udt(type):
     tif = _named(type)
     if not (tif.is_struct() or tif.is_union()):
         raise IdbError(protocol.BAD_ARGS, f"{type!r} is not a struct or union")
-    # rename_udm/set_udm_type on a get_named_type() tinfo silently no-op (return
-    # TERR_OK, change nothing) unless a genuine set_udm_type change happens to "prime"
-    # the tinfo first — so a pure rename is lost. Rebuild the UDT and replace the stored
-    # definition instead; that always persists. get_udt_details carries the full layout
-    # (offsets, packing, is_fixed, member comments) so create_udt reproduces it exactly.
     def_name = tif.get_final_type_name()
     target = _named(def_name)
-    idx = _member_index(target, member)
-    if idx < 0:
-        raise IdbError(protocol.NOT_FOUND, f"no member {member!r} in {type!r}")
     udt = T.udt_type_data_t()
     if not target.get_udt_details(udt):
         raise IdbError(protocol.IDA_ERROR, f"could not read members of {type!r}")
-    type_cmt = target.get_type_cmt()
-    repeatable = bool(target.get_type_rptcmt())
-    udt[idx].type = _parse_type(new_type)
-    if new_name:
-        udt[idx].name = new_name
+    return def_name, target, udt, target.get_type_cmt(), bool(target.get_type_rptcmt())
+
+
+def _save_udt(def_name, udt, is_union, type_cmt, repeatable):
+    # A fixed struct carries an explicit total_size; growing the layout (insert, or a
+    # set_member whose new type reaches past the old end) leaves it stale and create_udt
+    # rejects the type. Grow it to cover the furthest member. Never shrink — a reversed
+    # struct may keep intentional trailing padding that a pure rename must preserve.
+    if not is_union and udt.size():
+        end = max(m.offset // 8 + max(m.type.get_size(), 0) for m in udt)
+        if udt.total_size < end:
+            udt.total_size = end
+        if udt.unpadded_size < end:
+            udt.unpadded_size = end
     rebuilt = T.tinfo_t()
-    if not rebuilt.create_udt(udt, T.BTF_UNION if target.is_union() else T.BTF_STRUCT):
+    if not rebuilt.create_udt(udt, T.BTF_UNION if is_union else T.BTF_STRUCT):
         raise IdbError(protocol.IDA_ERROR, f"could not rebuild {def_name!r}")
     if type_cmt:
         rebuilt.set_type_cmt(type_cmt, not repeatable)
     code = rebuilt.set_named_type(idahelp.til(), def_name, T.NTF_REPLACE)
     if code != T.TERR_OK:
         raise IdbError(protocol.IDA_ERROR, f"set_named_type failed: {T.tinfo_errstr(code)}")
-    back = _named(type)
-    _, m = back.get_udm(idx)
-    return {"type": type, "index": idx, "name": m.name, "member_type": str(m.type)}
+
+
+def _arm_index(target, member, is_union):
+    return _union_arm_ordinal(target, member) if is_union else _member_index(target, member)
+
+
+def _drop_members(udt, first, last):
+    """Erase members [first, last] (inclusive) by left-shifting the tail and popping."""
+    span = last - first + 1
+    count = udt.size()
+    for k in range(first, count - span):
+        udt[k] = udt[k + span]
+    for _ in range(span):
+        udt.pop_back()
+
+
+@handler("set_member", writes=True)
+def set_member(type, member, new_type, new_name=None):
+    def_name, target, udt, type_cmt, repeatable = _load_writable_udt(type)
+    idx = _member_index(target, member)
+    if idx < 0:
+        raise IdbError(protocol.NOT_FOUND, f"no member {member!r} in {type!r}")
+    new_tif = _parse_type(new_type)
+    width = new_tif.get_size() * 8
+    if width <= 0:
+        raise IdbError(protocol.BAD_ARGS, f"cannot size type {new_type!r}")
+    udt[idx].type = new_tif
+    udt[idx].size = width
+    if new_name:
+        udt[idx].name = new_name
+    # A larger type overwrites the bytes of the members that follow it: consume every
+    # later member whose original start falls within the enlarged footprint [start, end).
+    # Comparison uses the pre-rebuild offsets, so the overlap is judged against the layout
+    # the user is looking at. Unions are unaffected — every arm sits at offset 0.
+    consumed = []
+    if not target.is_union():
+        start = udt[idx].offset
+        end = start + width
+        last = idx
+        while last + 1 < udt.size() and udt[last + 1].offset < end:
+            consumed.append(udt[last + 1].name)
+            last += 1
+        if last > idx:
+            _drop_members(udt, idx + 1, last)
+    _save_udt(def_name, udt, target.is_union(), type_cmt, repeatable)
+    _, m = _named(type).get_udm(idx)
+    return {"type": type, "index": idx, "name": m.name,
+            "member_type": str(m.type), "consumed": consumed}
+
+
+@handler("insert_member", writes=True)
+def insert_member(type, new_type, name, before=None, after=None):
+    if before is not None and after is not None:
+        raise IdbError(protocol.BAD_ARGS, "insert_member takes at most one of --before/--after")
+    def_name, target, udt, type_cmt, repeatable = _load_writable_udt(type)
+    is_union = target.is_union()
+    member = T.udm_t()
+    member.name = name
+    member.type = _parse_type(new_type)
+    width = member.type.get_size() * 8
+    if width <= 0:
+        raise IdbError(protocol.BAD_ARGS, f"cannot size type {new_type!r}")
+    member.size = width
+
+    count = udt.size()
+    ref = before if before is not None else after
+    if ref is None:
+        pos = count
+        insert_off = 0 if is_union else target.get_size() * 8
+    else:
+        idx = _arm_index(target, ref, is_union)
+        if idx < 0 or idx >= count:
+            raise IdbError(protocol.NOT_FOUND, f"no member {ref!r} in {type!r}")
+        if before is not None:
+            pos = idx
+            insert_off = 0 if is_union else udt[idx].offset
+        else:
+            pos = idx + 1
+            insert_off = 0 if is_union else udt[idx].offset + udt[idx].type.get_size() * 8
+    member.offset = insert_off
+    if not is_union:
+        for i in range(count):
+            if udt[i].offset >= insert_off:
+                udt[i].offset += width
+    udt.push_back(member)
+    for i in range(count, pos, -1):
+        udt[i] = udt[i - 1]
+    udt[pos] = member
+    _save_udt(def_name, udt, is_union, type_cmt, repeatable)
+    _, m = _named(type).get_udm(pos)
+    return {"type": type, "index": pos, "name": m.name,
+            "member_type": str(m.type), "offset": m.offset // 8}
+
+
+@handler("del_member", writes=True)
+def del_member(type, member, leave_gap=False):
+    def_name, target, udt, type_cmt, repeatable = _load_writable_udt(type)
+    is_union = target.is_union()
+    idx = _arm_index(target, member, is_union)
+    count = udt.size()
+    if idx < 0 or idx >= count:
+        raise IdbError(protocol.NOT_FOUND, f"no member {member!r} in {type!r}")
+    removed = udt[idx].name
+    width = udt[idx].type.get_size() * 8
+    if not is_union and not leave_gap:
+        for i in range(idx + 1, count):
+            udt[i].offset -= width
+    _drop_members(udt, idx, idx)
+    # Leaving a gap means the surviving members keep their exact byte offsets. create_udt
+    # repacks a non-fixed struct by natural alignment (closing the hole), so pin the layout
+    # fixed to honor the explicit offsets and the now-undefined gap bytes.
+    if not is_union and leave_gap:
+        udt.set_fixed()
+    _save_udt(def_name, udt, is_union, type_cmt, repeatable)
+    return {"type": type, "removed": removed, "leave_gap": bool(leave_gap)}
 
 
 def _parse_enum_members(members):
@@ -555,7 +676,7 @@ def enum(name, members, bitfield=False):
 def _union_arm_ordinal(union_tif, member):
     """member as an int (or 0x-int) is the union-arm ordinal directly; otherwise a
     field name resolved via find_udm. Union arms all share offset 0, so a byte-offset
-    lookup (as setmember uses) is meaningless here. Returns -1 if not an arm."""
+    lookup (as set_member uses) is meaningless here. Returns -1 if not an arm."""
     s = str(member)
     try:
         return int(s, 16) if s.lower().startswith("0x") else int(s, 10)

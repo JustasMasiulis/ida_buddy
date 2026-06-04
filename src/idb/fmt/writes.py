@@ -42,8 +42,22 @@ def format_settype(result, ns=None):
     return f"{where} : {result['type']}"
 
 
-def format_setmember(result, ns=None):
-    return f"{result['type']}[{result['index']}] {result['name']} : {result['member_type']}"
+def format_set_member(result, ns=None):
+    line = f"{result['type']}[{result['index']}] {result['name']} : {result['member_type']}"
+    consumed = result.get("consumed") or []
+    if consumed:
+        line += f" (consumed {', '.join(consumed)})"
+    return line
+
+
+def format_insert_member(result, ns=None):
+    return (f"inserted {result['type']}[{result['index']}] {result['name']} : "
+            f"{result['member_type']} @ {result['offset']:#x}")
+
+
+def format_del_member(result, ns=None):
+    tag = " (gap left)" if result.get("leave_gap") else ""
+    return f"removed {result['type']}.{result['removed']}{tag}"
 
 
 def format_setlvar(result, ns=None):

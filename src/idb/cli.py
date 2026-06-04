@@ -91,7 +91,9 @@ FORMATTERS = {
     "redo": fmt_writes.format_redo,
     "declare": fmt_writes.format_declare,
     "settype": fmt_writes.format_settype,
-    "setmember": fmt_writes.format_setmember,
+    "set_member": fmt_writes.format_set_member,
+    "insert_member": fmt_writes.format_insert_member,
+    "del_member": fmt_writes.format_del_member,
     "setlvar": fmt_writes.format_setlvar,
     "enum": fmt_writes.format_enum,
     "union_select": fmt_writes.format_union_select,
@@ -317,12 +319,24 @@ def build_parser():
     sp.add_argument("var")
     sp.add_argument("--name", default=None)
     sp.add_argument("--type", dest="type", default=None)
-    sp = cmd("setmember", help="edit a struct member [mut]",
-             ex=("setmember Foo a int count",))
+    sp = cmd("set_member", help="retype/rename an existing struct member [mut]",
+             ex=("set_member Foo a int count",))
     sp.add_argument("type")
     sp.add_argument("member")
     sp.add_argument("new_type")
     sp.add_argument("new_name", nargs="?", default=None)
+    sp = cmd("insert_member", help="add a struct member before/after another, else append [mut]",
+             ex=("insert_member Foo int count --after a", "insert_member Foo void *ctx"))
+    sp.add_argument("type")
+    sp.add_argument("new_type")
+    sp.add_argument("name")
+    sp.add_argument("--before", default=None)
+    sp.add_argument("--after", default=None)
+    sp = cmd("del_member", help="remove a struct member, closing the gap [mut]",
+             ex=("del_member Foo b", "del_member Foo 0x8 --leave-gap"))
+    sp.add_argument("type")
+    sp.add_argument("member")
+    sp.add_argument("--leave-gap", dest="leave_gap", action="store_true")
     sp = cmd("enum", help="create/extend an enum [mut]", ex=("enum Color r=0,g=1,b=2",))
     sp.add_argument("name")
     sp.add_argument("members", help="k=v,k=v,...")
@@ -449,8 +463,13 @@ def build_request(ns):
         return c, {"target": ns.target, "type": ns.type}
     if c == "setlvar":
         return c, {"func": ns.func, "var": ns.var, "name": ns.name, "type": ns.type}
-    if c == "setmember":
+    if c == "set_member":
         return c, {"type": ns.type, "member": ns.member, "new_type": ns.new_type, "new_name": ns.new_name}
+    if c == "insert_member":
+        return c, {"type": ns.type, "new_type": ns.new_type, "name": ns.name,
+                   "before": ns.before, "after": ns.after}
+    if c == "del_member":
+        return c, {"type": ns.type, "member": ns.member, "leave_gap": ns.leave_gap}
     if c == "enum":
         return c, {"name": ns.name, "members": ns.members, "bitfield": ns.bitfield}
     if c == "patch":
