@@ -328,6 +328,9 @@ def _harvest_args(start, budget):
         if budget.expired or done >= _ARG_MAX_DECOMP or len(sites) >= _ARG_MAX_SITES:
             stopped_early = True
             break
+        # A cached caller cfunc is not refreshed when the target's prototype
+        # changes, so its call-site arg types go stale. Force a fresh ctree.
+        ida_hexrays.mark_cfunc_dirty(caller)
         try:
             cfunc = ida_hexrays.decompile(caller)
         except Exception:

@@ -78,6 +78,9 @@ def decompile(func, offset=0, count=None):
     f = ida_funcs.get_func(ea)
     if f is None:
         raise IdbError(protocol.NOT_FOUND, f"no function at {func!r}")
+    # The cache is not invalidated when a callee's prototype or a referenced
+    # struct changes, so cached pseudocode shows stale types. Force a fresh run.
+    ida_hexrays.mark_cfunc_dirty(f.start_ea)
     try:
         cfunc = ida_hexrays.decompile(f.start_ea)
     except ida_hexrays.DecompilationFailure as exc:

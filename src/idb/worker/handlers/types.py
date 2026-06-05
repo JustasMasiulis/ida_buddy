@@ -262,6 +262,7 @@ def _typeof_lvar(func, var):
     import ida_hexrays
 
     if ida_hexrays.init_hexrays_plugin():
+        ida_hexrays.mark_cfunc_dirty(f.start_ea)
         try:
             cfunc = ida_hexrays.decompile(f.start_ea)
             for lv in cfunc.get_lvars():
@@ -363,6 +364,10 @@ def _hexrays_lvar(func_start, var):
 
     if not ida_hexrays.init_hexrays_plugin():
         return None, None
+    # Decompile fresh: a cached cfunc can carry a stale lvar list/types after a
+    # referenced struct or callee prototype changed, and this lvar is about to
+    # be edited or reported.
+    ida_hexrays.mark_cfunc_dirty(func_start)
     try:
         cfunc = ida_hexrays.decompile(func_start)
     except ida_hexrays.DecompilationFailure:
@@ -704,6 +709,10 @@ def union_select(addr, member):
         raise IdbError(protocol.NOT_FOUND, f"no function contains {addr!r}")
     if not ida_hexrays.init_hexrays_plugin():
         raise IdbError(protocol.IDA_ERROR, "Hex-Rays is required for union-select")
+    # Locate the union access on a fresh ctree: a cached cfunc can place the
+    # access at a stale spot after a referenced struct or callee retype, so the
+    # selection would be keyed to the wrong site.
+    ida_hexrays.mark_cfunc_dirty(f.start_ea)
     try:
         cfunc = ida_hexrays.decompile(f.start_ea)
     except ida_hexrays.DecompilationFailure as exc:

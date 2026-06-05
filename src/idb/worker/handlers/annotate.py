@@ -49,6 +49,9 @@ def _set_pseudocode_comment(func_start, ea, text):
     apply + detect orphaning on the same cfunc. Returns True if it anchored."""
     if not ida_hexrays.init_hexrays_plugin():
         return False
+    # Anchor on a fresh ctree: a cached cfunc can map ea to a stale statement
+    # after a referenced struct or callee retype, orphaning the comment.
+    ida_hexrays.mark_cfunc_dirty(func_start)
     try:
         cfunc = ida_hexrays.decompile(func_start)
     except ida_hexrays.DecompilationFailure:

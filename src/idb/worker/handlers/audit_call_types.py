@@ -172,6 +172,10 @@ def audit_call_types(scope=None, budget=None, limit=None, min_sites=None, min_ca
         f = ida_funcs.get_func(f_ea)
         if f is None or (f.flags & ida_funcs.FUNC_THUNK):
             continue
+        # The decompiler cache is not invalidated when a callee's prototype or a
+        # referenced struct changes, so a cached cfunc carries stale call-site
+        # arg/member types. Force a fresh ctree against current DB state.
+        ida_hexrays.mark_cfunc_dirty(f_ea)
         try:
             cfunc = ida_hexrays.decompile(f_ea)
         except Exception:

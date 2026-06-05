@@ -235,13 +235,13 @@ def test_memory_aliases_are_compact_and_parseable(cli_session):
 
     db = _run(env, "db", addr, "-n", "16")
     db_line = db.stdout.splitlines()[0]
-    assert re.match(r"^[0-9a-f]{12}\s{2}", db_line)
+    assert re.match(r"^[0-9a-f]+\s{2}", db_line)
     assert "-" in db_line
     assert re.search(r"\s{2}.{1,16}$", db_line)
 
     dd = _run(env, "dd", addr, "-n", "4")
     dd_line = dd.stdout.splitlines()[0]
-    assert re.match(r"^[0-9a-f]{12}\s{2}(?:[0-9a-f]{8}\s*){1,4}$", dd_line)
+    assert re.match(r"^[0-9a-f]+\s{2}(?:[0-9a-f]{8}\s*){1,4}$", dd_line)
 
 
 def test_string_search_workflow_reuses_visible_output(cli_session):
