@@ -157,6 +157,11 @@ def undo():
 
 @handler("redo")
 def redo():
+    label = ""
+    try:
+        label = ida_undo.get_redo_action_label() or ""
+    except Exception:
+        pass
     if not ida_undo.perform_redo():
         raise IdbError(protocol.IDA_ERROR, "nothing to redo")
-    return {"redone": True}
+    return {"redone": True, "label": label}

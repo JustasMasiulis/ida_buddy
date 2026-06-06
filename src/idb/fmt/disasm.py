@@ -12,7 +12,7 @@ def format_disas(result, ns=None):
     out = []
     f = result.get("func")
     if result.get("mode") == "func" and f:
-        out.append(f"{f['name']}  ({f['seg']} @ {f['start']:#x}):")
+        out.append(f"{f['name']}  ({f['seg']} @ {f['start']:x}):")
     width = _addr_width(lines)
     for ln in lines:
         row = f"{ln['ea']:0{width}x}  {ln['text']}"
@@ -23,5 +23,5 @@ def format_disas(result, ns=None):
 
 
 def format_decompile(result, ns=None):
-    head = f"// {result['func']} @ {result['ea']:#x}"
+    head = f"// {result['ea']:x}"
     return head + "\n" + shorten("\n".join(result.get("lines", [])))

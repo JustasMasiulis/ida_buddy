@@ -11,7 +11,7 @@ def _ctx_lines(rows):
     out = []
     for r in rows:
         prefix = f"{r.get('dir', ''):<4}  " if show_dir else ""
-        line = f"{prefix}{r['ea']:0{width}x}  {r.get('kind', ''):<6}  {r['insn']}"
+        line = f"{prefix}{r['ea']:0{width}x}  {r['insn']}"
         if r.get("func"):
             line += f"   ; in {r['func']}"
         out.append(line.rstrip())
@@ -33,17 +33,17 @@ def format_search(result, ns=None):
 
 
 def format_calls(result, ns=None):
-    out = [f"{result['func']}  @ {result['ea']:#x}"]
+    out = [f"{result['func']}  @ {result['ea']:x}"]
     callers = result.get("callers", [])
     out.append(f"  callers ({len(callers)}):")
     for c in callers:
         indent = "  " * (c.get("depth", 1) - 1)
         where = f"  ; in {c['func']}" if c.get("func") else ""
-        out.append(f"    {indent}{c['ea']:#x}  {c['insn']}{where}")
+        out.append(f"    {indent}{c['ea']:x}  {c['insn']}{where}")
     callees = result.get("callees", [])
     out.append(f"  callees ({len(callees)}):")
     for c in callees:
-        out.append(f"    {c['ea']:#x}  {c.get('name') or '?'}")
+        out.append(f"    {c['ea']:x}  {c.get('name') or '?'}")
     return "\n".join(out)
 
 
@@ -54,7 +54,7 @@ def format_strrefs(result, ns=None):
     width = _addr_width(rows)
     out = []
     for r in rows:
-        line = f"{r['ea']:0{width}x}  {r.get('kind', ''):<6}  {r['insn']}"
+        line = f"{r['ea']:0{width}x}  {r['insn']}"
         bits = []
         if r.get("func"):
             bits.append(f"in {r['func']}")

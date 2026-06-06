@@ -50,10 +50,10 @@ def test_open_summary_lines():
     lines = out.splitlines()
     assert lines[0] == "where.exe   Portable executable for AMD64 (PE)"
     assert "arch     metapc 64-bit little-endian" in out
-    assert "base     0x140000000   size 0xd000 (53248 bytes)" in out
+    assert "base     140000000   size d000 (53248 bytes)" in out
     assert "md5      8066fe09b1f19ba7752896c2fd68b04c" in out
     assert "segments 7   functions 103   named globals 186" in out
-    assert "wmainCRTStartup@0x140001300" in out
+    assert "wmainCRTStartup@140001300" in out
 
 
 def test_segments_table():
@@ -113,20 +113,27 @@ def test_values_layout():
 
 def test_string_layout():
     out = fmt_memory.format_string({"addr": 0x401000, "encoding": "ascii", "length": 3, "text": "abc"})
-    assert out == '0x401000  ascii 3 bytes  "abc"'
+    assert out == '401000  ascii 3 bytes  "abc"'
 
 
 def test_nearest_layout():
     out = listing.format_nearest({"addr": 0x401010, "symbol": {"name": "f", "ea": 0x401000, "offset": 0x10},
                                   "func": {"name": "f", "ea": 0x401000, "offset": 0x10}})
-    assert "0x401010" in out and "f+0x10" in out and "(in f+0x10)" in out
+    assert "401010" in out and "f+10" in out and "(in f+10)" in out
+
+
+def test_nearest_without_symbol_shows_only_the_enclosing_func():
+    # handler drops a named symbol that sits before the enclosing func (the far/irrelevant one)
+    out = listing.format_nearest({"addr": 0x2033d0, "symbol": None,
+                                  "func": {"name": "sub_203390", "ea": 0x203390, "offset": 0x40}})
+    assert out == "2033d0   (in sub_203390+40)"
 
 
 def test_xrefs_format():
     result = {"data": [{"ea": 0x401204, "kind": "call", "func": "validate_key",
                         "insn": "call sub_401300"}]}
     out = fmt_xrefs.format_xrefs(result)
-    assert out == "401204  call    call sub_401300   ; in validate_key"
+    assert out == "401204  call sub_401300   ; in validate_key"
 
 
 def test_calls_format():
@@ -154,48 +161,82 @@ def test_types_empty_and_table():
     lines = out.splitlines()
     assert lines[0].split() == ["SRC", "KIND", "SIZE", "NAME"]
     assert "local" in out and "ntddk.til" in out and "GUID" in out
-    assert "0x10" in out
+    assert "10" in out and "40" in out  # SIZE column is bare hex
 
 
 def test_member_paths_format():
     result = {"type": "GUID", "offset": 8,
               "paths": [{"path": "Data4[0]", "type": "unsigned __int8", "size": 1}]}
     out = fmt_types.format_member(result)
+    assert out.startswith("GUID @ +8:")  # queried type + offset as bare-hex +N
     assert "Data4[0] : BYTE" in out and "size 0x1" in out
+
+
+def test_members_table_offset_is_plus_hex_and_size_is_bare():
+    result = {"name": "S", "kind": "struct", "size": 0x18, "is_union": False, "members": [
+        {"name": "a", "offset": 0, "size": 4, "type": "int", "bitfield": False},
+        {"name": "b", "offset": 0x10, "size": 8, "type": "__int64", "bitfield": False},
+    ]}
+    out = fmt_types.format_type(result)
+    assert out.splitlines()[1].split() == ["OFF", "SIZE", "TYPE", "NAME"]
+    assert "+0     4" in out and "+10     8" in out  # OFF is +hex, SIZE is bare hex
+    assert "0x" not in out.split("\n", 1)[1]  # nothing under the header carries 0x
 
 
 def test_typeof_format():
     out = fmt_types.format_typeof({"target": "g", "type": "int", "kind": "scalar", "size": 4})
-    assert out == "g : INT  (scalar, 0x4 bytes)"
+    assert out == "g is INT  (scalar, 0x4 bytes)"
+
+
+def test_typeof_suppresses_function_badsize():
+    out = fmt_types.format_typeof({"target": "f", "type": "void __fastcall()",
+                                   "kind": "function", "size": 0xFFFFFFFFFFFFFFFF})
+    assert out == "f is void __fastcall()  (function)"  # no garbage "0xffffffffffffffff bytes"
 
 
 def test_type_dispatches_to_typeof_shape():
     # `dt <address>` returns a typeof-shape result; format_type must delegate.
     out = fmt_types.format_type({"target": "sub_401000", "ea": 0x401000,
                                  "kind": "function", "type": "void __fastcall()", "size": 0})
-    assert out == "sub_401000 : void __fastcall()  (function, 0x0 bytes)"
+    assert out == "sub_401000 is void __fastcall()  (function, 0x0 bytes)"
 
 
 def test_write_formats():
-    assert fmt_writes.format_rename({"ea": 0x401000, "name": "f", "kind": "name"}) == "renamed 0x401000 -> f"
+    assert fmt_writes.format_rename({"ea": 0x401000, "name": "f", "kind": "name"}) == "renamed 401000 -> f"
     assert fmt_writes.format_rename({"target": "g:v", "name": "x", "kind": "lvar"}) == "renamed local g:v -> x"
-    assert fmt_writes.format_patch({"ea": 0x401000, "count": 2, "bytes": b"\x90\x90"}) == "patched 2 bytes @ 0x401000: 9090"
+    assert fmt_writes.format_patch({"ea": 0x401000, "count": 2, "bytes": b"\x90\x90"}) == "patched 2 bytes @ 401000: 9090"
     assert fmt_writes.format_enum({"name": "E", "members": [{"name": "A", "value": 1}]}) == "enum E: A=1"
     assert fmt_writes.format_undo({"undone": True, "label": "patch"}) == "undone: patch"
-    assert fmt_writes.format_settype({"ea": 0x401000, "type": "int *"}) == "0x401000 : int *"
+    assert fmt_writes.format_settype({"ea": 0x401000, "type": "int *"}) == "set 401000 to int *"
     us = {"ea": 0x401000, "union": "U", "member": "u1", "ordinal": 1, "verified": True}
-    assert fmt_writes.format_union_select(us) == "union @ 0x401000: U -> .u1 (arm 1)"
-    assert fmt_writes.format_union_select({**us, "verified": False}) == "union @ 0x401000: U -> .u1 (arm 1) (unverified)"
+    assert fmt_writes.format_union_select(us) == "union 401000: U -> .u1 (arm 1)"
+    assert fmt_writes.format_union_select({**us, "verified": False}) == "union 401000: U -> .u1 (arm 1) (unverified)"
 
 
 def test_comment_and_extend_formats():
     both = {"ea": 0x401000, "comment": "x", "disasm": True, "pseudocode": True}
-    assert fmt_writes.format_comment(both) == "comment @ 0x401000 (disasm+pseudo): x"
+    assert fmt_writes.format_comment(both) == "comment 401000 (disasm+pseudo): x"
     dis_only = {"ea": 0x401000, "comment": "x", "disasm": True, "pseudocode": False}
-    assert fmt_writes.format_comment(dis_only) == "comment @ 0x401000 (disasm): x"
+    assert fmt_writes.format_comment(dis_only) == "comment 401000 (disasm): x"
     extended = {"name": "E", "extended": True, "members": [{"name": "C", "value": 9}]}
     assert fmt_writes.format_enum(extended) == "enum E extended: C=9"
-    assert fmt_writes.format_settype({"target": "f:v", "type": "char"}) == "f:v : char"
+    assert fmt_writes.format_settype({"target": "f:v", "type": "char"}) == "set f:v to char"
+
+
+def test_write_labels_and_silent_confirmations():
+    assert fmt_writes.format_set_member({"type": "S", "index": 2, "name": "a",
+                                         "member_type": "int"}) == "set S[2] a to int"
+    assert fmt_writes.format_declare({"ok": True}) == "declared"
+    assert fmt_writes.format_redo({"redone": True, "label": ""}) == "redone"  # no label
+    assert fmt_writes.format_redo({"redone": True, "label": "set type"}) == "redone: set type"
+    assert listing.format_saved({"saved": r"C:\work\hvix64.i64"}) == "saved hvix64.i64"
+
+
+def test_comment_clips_overlong_text():
+    long = "A" * 200
+    out = fmt_writes.format_comment({"ea": 0x401000, "comment": long, "disasm": True, "pseudocode": False})
+    assert out.startswith("comment 401000 (disasm): ") and out.endswith("…")
+    assert len(out) < 120 and "\n" not in out
 
 
 def test_generic_renders_bytes_as_hex():
@@ -211,16 +252,16 @@ def test_pointers_format():
     ]})
     lines = out.splitlines()
     assert lines[0] == "1000  0000000140001300  wmain"
-    assert lines[1] == "1008  0000000140001350  wmain+0x50"
+    assert lines[1] == "1008  0000000140001350  wmain+50"
     assert lines[2] == "1010  0000000000000005"
     assert fmt_memory.format_pointers({"addr": 0x1000, "width": 8, "data": []}) == "(no pointers)"
 
 
 def test_string_struct_format():
     wide = {"addr": 0x2000, "wide": True, "length": 8, "maxlen": 10, "buffer": 0x3000, "text": "kernel32"}
-    assert fmt_memory.format_string_struct(wide) == '0x2000  UNICODE_STRING len=8 max=10 buf=0x3000  "kernel32"'
+    assert fmt_memory.format_string_struct(wide) == '2000  UNICODE_STRING len=8 max=10 buf=3000  "kernel32"'
     ansi = {"addr": 0x2000, "wide": False, "length": 3, "maxlen": 4, "buffer": 0x3000, "text": "abc"}
-    assert fmt_memory.format_string_struct(ansi) == '0x2000  ANSI_STRING len=3 max=4 buf=0x3000  "abc"'
+    assert fmt_memory.format_string_struct(ansi) == '2000  ANSI_STRING len=3 max=4 buf=3000  "abc"'
 
 
 def test_string_redirected_to_struct_renders_struct_view():
@@ -229,7 +270,7 @@ def test_string_redirected_to_struct_renders_struct_view():
     redirected = {"addr": 0x2000, "wide": True, "length": 8, "maxlen": 10,
                   "buffer": 0x3000, "text": "kernel32", "redirected_to_struct": True}
     assert fmt_memory.format_string(redirected) == \
-        '0x2000  UNICODE_STRING len=8 max=10 buf=0x3000  "kernel32"'
+        '2000  UNICODE_STRING len=8 max=10 buf=3000  "kernel32"'
 
 
 def test_string_raw_fallback_ascii_dump():
@@ -268,8 +309,8 @@ def test_calls_depth_indent():
         {"ea": 0x401200, "func": "h", "insn": "call g", "depth": 2},
     ], "callees": [{"ea": 0x402000, "name": "puts"}]})
     lines = out.splitlines()
-    depth1 = next(l for l in lines if "0x401100" in l)
-    depth2 = next(l for l in lines if "0x401200" in l)
+    depth1 = next(l for l in lines if "401100" in l)
+    depth2 = next(l for l in lines if "401200" in l)
     assert (len(depth2) - len(depth2.lstrip())) > (len(depth1) - len(depth1.lstrip()))
 
 
@@ -287,12 +328,12 @@ def test_type_value_overlay_format():
               "members": [{"name": "Data1", "offset": 0, "size": 4, "type": "unsigned int",
                            "bitfield": False, "value": 0xDEADBEEF}]}
     out = fmt_types.format_type(result)
-    assert "@ 0x6000" in out and "VALUE" in out and "0xdeadbeef" in out
+    assert "@ 6000" in out and "VALUE" in out and "deadbeef" in out
 
 
 def test_setlvar_format():
     assert fmt_writes.format_setlvar({"target": "main:counter", "kind": "lvar",
-                                      "name": "counter", "type": "int"}) == "main:counter : int"
+                                      "name": "counter", "type": "int"}) == "set main:counter to int"
 
 
 def _triage_full():
@@ -343,6 +384,18 @@ def test_triage_full_layout():
     assert 'strings: 2' in out and '"\\Device\\WfpAle"   (unicode_string)' in out
 
 
+def test_triage_param_collapses_when_observed_matches_declared():
+    result = {"func": "f", "ea": 0x401000, "size": 0x20, "arg_types": [
+        {"index": 2, "decl": "unsigned __int64",
+         "actuals": [{"type": "unsigned __int64", "count": 4}], "member": None},
+        {"index": 3, "decl": "void *",
+         "actuals": [{"type": "FOO*", "count": 2}], "member": None},
+    ], "arg_caller_count": 4}
+    out = fmt_triage.format_triage(result)
+    assert "a2  QWORD x4" in out  # observed == declared -> printed once
+    assert "a3  void *  FOO* x2" in out  # mismatch -> both shown
+
+
 def test_triage_unnamed_callee_sorts_first():
     out = fmt_triage.format_triage(_triage_full())
     lines = [l for l in out.splitlines() if "func" in l or "import" in l]
@@ -383,6 +436,6 @@ def test_triage_omits_empty_sections():
 
 def test_op_format():
     assert fmt_writes.format_op({"ea": 0x401234, "repr": "char", "opnum": None,
-                                 "disasm": True, "pseudocode": True}) == "op @ 0x401234 -> char (disasm+pseudo)"
+                                 "disasm": True, "pseudocode": True}) == "op 401234 -> char (disasm+pseudo)"
     assert fmt_writes.format_op({"ea": 0x401234, "repr": "enum:Foo", "opnum": 1,
-                                 "disasm": True, "pseudocode": False}) == "op @ 0x401234 op1 -> enum:Foo (disasm)"
+                                 "disasm": True, "pseudocode": False}) == "op 401234 op1 -> enum:Foo (disasm)"

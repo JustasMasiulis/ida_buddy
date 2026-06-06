@@ -51,7 +51,7 @@ def format_string(result, ns=None):
         gutter = _utf16_gutter if result["encoding"] == "utf16" else _ascii_gutter
         return _hexdump(result["addr"], result["bytes"], gutter)
     text = result["text"].replace("\r", "\\r").replace("\n", "\\n")
-    return f'{result["addr"]:#x}  {result["encoding"]} {result["length"]} bytes  "{text}"'
+    return f'{result["addr"]:x}  {result["encoding"]} {result["length"]} bytes  "{text}"'
 
 
 def format_pointers(result, ns=None):
@@ -64,7 +64,7 @@ def format_pointers(result, ns=None):
     for r in rows:
         line = f"{r['ea']:0{aw}x}  {r['value']:0{w}x}"
         if r.get("sym"):
-            line += f"  {r['sym']}" + (f"+{r['off']:#x}" if r.get("off") else "")
+            line += f"  {r['sym']}" + (f"+{r['off']:x}" if r.get("off") else "")
         out.append(line)
     return "\n".join(out)
 
@@ -72,5 +72,5 @@ def format_pointers(result, ns=None):
 def format_string_struct(result, ns=None):
     kind = "UNICODE_STRING" if result["wide"] else "ANSI_STRING"
     text = (result.get("text") or "").replace("\r", "\\r").replace("\n", "\\n")
-    return (f'{result["addr"]:#x}  {kind} len={result["length"]} '
-            f'max={result["maxlen"]} buf={result["buffer"]:#x}  "{text}"')
+    return (f'{result["addr"]:x}  {kind} len={result["length"]} '
+            f'max={result["maxlen"]} buf={result["buffer"]:x}  "{text}"')

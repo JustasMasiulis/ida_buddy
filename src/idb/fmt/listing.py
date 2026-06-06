@@ -2,12 +2,13 @@
 commands whose dedicated formatter hasn't landed yet."""
 
 import json
+import os
 
 from .columns import align
 
 
 def _h(value):
-    return hex(value) if isinstance(value, int) else str(value)
+    return f"{value:x}" if isinstance(value, int) else str(value)
 
 
 def _th(value):
@@ -52,7 +53,7 @@ def format_segments(result, ns=None):
 
 
 def format_saved(result, ns=None):
-    return f"saved {result.get('saved')}"
+    return f"saved {os.path.basename(result.get('saved') or '')}"
 
 
 def _oneline(text, limit=100):
@@ -101,13 +102,13 @@ def format_strings(result, ns=None):
 
 
 def format_nearest(result, ns=None):
-    parts = [f"{result['addr']:#x}"]
+    parts = [f"{result['addr']:x}"]
     sym = result.get("symbol")
     if sym:
-        parts.append(f"{sym['name']}+{sym['offset']:#x}" if sym["offset"] else sym["name"])
+        parts.append(f"{sym['name']}+{sym['offset']:x}" if sym["offset"] else sym["name"])
     func = result.get("func")
     if func:
-        suffix = f"+{func['offset']:#x}" if func["offset"] else ""
+        suffix = f"+{func['offset']:x}" if func["offset"] else ""
         parts.append(f"(in {func['name']}{suffix})")
     if not sym and not func:
         parts.append("(no nearby symbol)")

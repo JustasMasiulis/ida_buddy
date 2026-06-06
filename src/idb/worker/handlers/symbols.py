@@ -109,4 +109,6 @@ def nearest(addr):
     if f is not None:
         func = {"name": ida_funcs.get_func_name(f.start_ea), "ea": f.start_ea,
                 "offset": ea - f.start_ea}
+    if func and symbol and symbol["ea"] < func["ea"]:
+        symbol = None  # nearest named symbol sits before the enclosing func -> the func is the real anchor
     return {"addr": ea, "symbol": symbol, "func": func}

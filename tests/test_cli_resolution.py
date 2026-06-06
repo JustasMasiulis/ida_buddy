@@ -371,5 +371,5 @@ def test_emit_renders_struct_redirect_and_warns_on_stderr(capsys):
     reply = protocol.build_ok(1, result, {"warning": "0x2000 is typed ANSI_STRING; use `ds`"})
     assert cli.emit("string", reply, _ns()) == 0
     captured = capsys.readouterr()
-    assert captured.out.strip() == '0x2000  ANSI_STRING len=3 max=4 buf=0x3000  "abc"'
+    assert captured.out.strip() == '2000  ANSI_STRING len=3 max=4 buf=3000  "abc"'
     assert "idb: warning: 0x2000 is typed ANSI_STRING; use `ds`" in captured.err

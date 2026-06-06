@@ -71,9 +71,12 @@ def _params_block(result):
     decls = [shorten(r.get("decl") or "") for r in rows]
     decl_w = max((len(d) for d in decls), default=0)
     for r, decl in zip(rows, decls):
-        decl = decl.ljust(decl_w)
-        actuals = ", ".join(f"{shorten(a['type'])} x{a['count']}" for a in r["actuals"])
-        line = f"  a{r['index']}  {decl}  {actuals}".rstrip()
+        actuals = [(shorten(a["type"]), a["count"]) for a in r["actuals"]]
+        if len(actuals) == 1 and actuals[0][0] == decl:  # observed type == declared: don't print it twice
+            line = f"  a{r['index']}  {decl} x{actuals[0][1]}"
+        else:
+            joined = ", ".join(f"{t} x{c}" for t, c in actuals)
+            line = f"  a{r['index']}  {decl.ljust(decl_w)}  {joined}".rstrip()
         if r.get("member"):
             line += f"   ; {r['member']}"
         out.append(line)
