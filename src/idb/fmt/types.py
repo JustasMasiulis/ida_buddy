@@ -1,6 +1,7 @@
 """type / types / struct / member / typeof / frame formatters."""
 
 from .columns import align
+from .compact import shorten
 
 
 def _members_table(members, with_values=False):
@@ -16,7 +17,7 @@ def _members_table(members, with_values=False):
             v = m.get("value")
             cells.append(hex(v) if isinstance(v, int) else (str(v) if v is not None else "?"))
         name = m["name"] + ("  :bitfield" if m.get("bitfield") else "")
-        cells.extend([m["type"], name])
+        cells.extend([shorten(m["type"]), name])
         rows.append(tuple(cells))
     return align(rows, headers=tuple(headers), aligns=tuple(aligns))
 
@@ -29,7 +30,7 @@ def format_type(result, ns=None):
         head += f"   @ {result['addr']:#x}"
     members = result.get("members")
     if members is None:
-        return f"{head}\n  {result.get('decl', '')}"
+        return f"{head}\n  {shorten(result.get('decl', ''))}"
     if result["kind"] == "enum":
         rows = [(m["name"], hex(m["value"])) for m in members]
         return head + "\n" + align(rows, headers=("NAME", "VALUE"), aligns=("<", ">"))
@@ -45,9 +46,9 @@ def format_types(result, ns=None):
 
 
 def format_member(result, ns=None):
-    out = [f"{result['type']} @ byte {result['offset']} ({result['offset']:#x}):"]
+    out = [f"{shorten(result['type'])} @ byte {result['offset']} ({result['offset']:#x}):"]
     for p in result.get("paths", []):
-        out.append(f"  {p['path']} : {p['type']}  (size {p['size']:#x})")
+        out.append(f"  {p['path']} : {shorten(p['type'])}  (size {p['size']:#x})")
     return "\n".join(out)
 
 
@@ -55,7 +56,7 @@ def format_typeof(result, ns=None):
     guessed = "  (guessed)" if result.get("guessed") else ""
     size = result.get("size")
     size_str = f", {size:#x} bytes" if isinstance(size, int) else ""
-    return f"{result['target']} : {result['type']}  ({result.get('kind', '?')}{size_str}){guessed}"
+    return f"{result['target']} : {shorten(result['type'])}  ({result.get('kind', '?')}{size_str}){guessed}"
 
 
 def format_frame(result, ns=None):

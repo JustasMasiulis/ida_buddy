@@ -2,6 +2,7 @@
 a trailing `+` on a count means that phase hit its cap or the time budget."""
 
 from .columns import align
+from .compact import shorten
 
 
 def _th(value):
@@ -67,10 +68,11 @@ def _params_block(result):
     head = (f"param types: {_count(result.get('arg_caller_count', 0), result.get('arg_types_truncated'))} "
             f"callers   (underlying, before implicit casts)")
     out = [head]
-    decl_w = max((len(r.get("decl") or "") for r in rows), default=0)
-    for r in rows:
-        decl = (r.get("decl") or "").ljust(decl_w)
-        actuals = ", ".join(f"{a['type']} x{a['count']}" for a in r["actuals"])
+    decls = [shorten(r.get("decl") or "") for r in rows]
+    decl_w = max((len(d) for d in decls), default=0)
+    for r, decl in zip(rows, decls):
+        decl = decl.ljust(decl_w)
+        actuals = ", ".join(f"{shorten(a['type'])} x{a['count']}" for a in r["actuals"])
         line = f"  a{r['index']}  {decl}  {actuals}".rstrip()
         if r.get("member"):
             line += f"   ; {r['member']}"
@@ -96,7 +98,7 @@ def format_triage(result, ns=None):
     if result.get("proto"):
         src = result.get("proto_source")
         suffix = f"  ({src})" if src in ("guessed", "tinfo") else ""
-        sections.append(f"proto  {result['proto']}{suffix}")
+        sections.append(f"proto  {shorten(result['proto'])}{suffix}")
 
     blocks = [
         _callees_block(result),

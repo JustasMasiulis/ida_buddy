@@ -1,10 +1,12 @@
 """audit_call_types formatter — compact, no table. Findings split into mismatches
 and concretizable; under each function name the findings sit on their own
-tab-indented lines:
+indented lines:
     <func>
-    \t<p|l> <slot>  <decl> -> <observed, dominant first>  <agree>% <sites>s/<distinct>d
+      <p|l> <slot>  <decl> -> <observed, dominant first>  <agree>% <sites>s/<distinct>d
 where the first observed type is the suggestion. A trailing `+` on the scanned
 count means the scan hit its budget or decompile limit."""
+
+from .compact import shorten
 
 
 def _count(n, truncated):
@@ -13,8 +15,8 @@ def _count(n, truncated):
 
 def _value(f):
     kind = "p" if f.get("kind") == "param" else "l"
-    actuals = ", ".join(f"{a['type']} x{a['count']}" for a in f.get("actuals", []))
-    line = (f"{kind} {f.get('slot', '')}  {f.get('decl') or '?'} -> {actuals}"
+    actuals = ", ".join(f"{shorten(a['type'])} x{a['count']}" for a in f.get("actuals", []))
+    line = (f"{kind} {f.get('slot', '')}  {shorten(f.get('decl') or '?')} -> {actuals}"
             f"  {round(f.get('agree', 0.0) * 100)}% {f.get('n_sites', 0)}s/{f.get('n_distinct', 0)}d")
     if f.get("member"):
         line += f"  ; {f['member']}"
@@ -28,7 +30,7 @@ def _section(title, findings):
     lines = ["", title, ""]
     for func, items in groups.items():
         lines.append(func)
-        lines.extend("\t" + _value(it) for it in items)
+        lines.extend("  " + _value(it) for it in items)
     return "\n".join(lines)
 
 

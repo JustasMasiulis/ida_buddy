@@ -5,6 +5,7 @@ from idb.fmt import xrefs as fmt_xrefs
 from idb.fmt import types as fmt_types
 from idb.fmt import writes as fmt_writes
 from idb.fmt import triage as fmt_triage
+from idb.fmt import audit_call_types as fmt_audit
 from idb.fmt.columns import align
 
 _SUMMARY = {
@@ -27,6 +28,21 @@ def test_align_right_alignment():
     line1, line2 = out.splitlines()
     assert line1 == "x      1"
     assert line2 == "yy  1000"
+
+
+def test_audit_findings_indent_with_spaces_not_tabs():
+    result = {
+        "functions_scanned": 1, "functions_total": 1, "call_sites": 2,
+        "findings": [{
+            "class": "mismatch", "kind": "param", "func": "sub_140001000",
+            "slot": "a1", "decl": "void *", "actuals": [{"type": "int", "count": 2}],
+            "agree": 0.5, "n_sites": 2, "n_distinct": 1,
+        }],
+    }
+    out = fmt_audit.format_audit_call_types(result)
+    assert "\t" not in out
+    finding = next(ln for ln in out.splitlines() if ln.lstrip().startswith("p a1"))
+    assert finding.startswith("  ") and finding[2] != " "
 
 
 def test_open_summary_lines():
@@ -126,7 +142,7 @@ def test_type_members_format():
     result = {"name": "GUID", "kind": "struct", "size": 16, "is_union": False,
               "members": [{"name": "Data1", "offset": 0, "size": 4, "type": "unsigned int", "bitfield": False}]}
     out = fmt_types.format_type(result)
-    assert "struct GUID" in out and "Data1" in out and "unsigned int" in out
+    assert "struct GUID" in out and "Data1" in out and "DWORD" in out
 
 
 def test_types_empty_and_table():
@@ -145,12 +161,12 @@ def test_member_paths_format():
     result = {"type": "GUID", "offset": 8,
               "paths": [{"path": "Data4[0]", "type": "unsigned __int8", "size": 1}]}
     out = fmt_types.format_member(result)
-    assert "Data4[0] : unsigned __int8" in out and "size 0x1" in out
+    assert "Data4[0] : BYTE" in out and "size 0x1" in out
 
 
 def test_typeof_format():
     out = fmt_types.format_typeof({"target": "g", "type": "int", "kind": "scalar", "size": 4})
-    assert out == "g : int  (scalar, 0x4 bytes)"
+    assert out == "g : INT  (scalar, 0x4 bytes)"
 
 
 def test_type_dispatches_to_typeof_shape():
@@ -313,7 +329,7 @@ def _triage_full():
 def test_triage_full_layout():
     out = fmt_triage.format_triage(_triage_full())
     assert out.splitlines()[0] == "WfpAleAuth @ 140012a40  size 0x3e0"
-    assert "proto  __int64 __fastcall WfpAleAuth(void *, __int64)  (guessed)" in out
+    assert "proto  INT64 __fastcall WfpAleAuth(void *, INT64)  (guessed)" in out
     assert "callees: 3" in out
     # callee table uses bare hex and un-named work items float to the top
     table = out[out.index("callees: 3"):]
@@ -323,7 +339,7 @@ def test_triage_full_layout():
     assert "structure" in out and "140013f00 (WfpAleAuth_cold_1)" in out
     assert "__C_specific_handler  (.pdata unwind, frame)" in out
     assert "param types: 3 callers" in out
-    assert "a1  __int64  BAR* x2, _QWORD x1   ; @0x20" in out
+    assert "a1  INT64   BAR* x2, QWORD x1   ; @0x20" in out
     assert 'strings: 2' in out and '"\\Device\\WfpAle"   (unicode_string)' in out
 
 

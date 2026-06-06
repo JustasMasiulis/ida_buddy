@@ -111,8 +111,8 @@ def test_audit_rows_are_well_formed(session):
     confid = re.findall(r"\b(\d+)% (\d+)s/(\d+)d\b", out)
     if head["findings"]:
         assert confid, f"header claims {head['findings']} findings but none parsed:\n{out}"
-        # compact rows: single-char p/l kind, indented under their function (tab) or inline
-        assert re.search(r"(?:\t|  )[pl] \S", out), out
+        # compact rows: single-char p/l kind, indented under their function with two spaces
+        assert re.search(r"  [pl] \S", out), out
     for agree, _sites, _distinct in confid:
         assert 0 <= int(agree) <= 100
 
