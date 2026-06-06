@@ -1,5 +1,7 @@
 """xref_to / xref_from / calls / search formatters."""
 
+from .compact import squash_insn
+
 
 def _addr_width(rows):
     return max((len(f"{r['ea']:x}") for r in rows), default=8)
@@ -11,7 +13,7 @@ def _ctx_lines(rows):
     out = []
     for r in rows:
         prefix = f"{r.get('dir', ''):<4}  " if show_dir else ""
-        line = f"{prefix}{r['ea']:0{width}x}  {r['insn']}"
+        line = f"{prefix}{r['ea']:0{width}x}  {squash_insn(r['insn'])}"
         if r.get("func"):
             line += f"   ; in {r['func']}"
         out.append(line.rstrip())
@@ -39,7 +41,7 @@ def format_calls(result, ns=None):
     for c in callers:
         indent = "  " * (c.get("depth", 1) - 1)
         where = f"  ; in {c['func']}" if c.get("func") else ""
-        out.append(f"    {indent}{c['ea']:x}  {c['insn']}{where}")
+        out.append(f"    {indent}{c['ea']:x}  {squash_insn(c['insn'])}{where}")
     callees = result.get("callees", [])
     out.append(f"  callees ({len(callees)}):")
     for c in callees:
@@ -54,7 +56,7 @@ def format_strrefs(result, ns=None):
     width = _addr_width(rows)
     out = []
     for r in rows:
-        line = f"{r['ea']:0{width}x}  {r['insn']}"
+        line = f"{r['ea']:0{width}x}  {squash_insn(r['insn'])}"
         bits = []
         if r.get("func"):
             bits.append(f"in {r['func']}")

@@ -136,6 +136,13 @@ def test_xrefs_format():
     assert out == "401204  call sub_401300   ; in validate_key"
 
 
+def test_xrefs_squashes_disasm_operand_padding():
+    result = {"data": [{"ea": 0x401204, "kind": "read", "func": "f",
+                        "insn": "mov     eax, [rsp+8]"}]}
+    out = fmt_xrefs.format_xrefs(result)
+    assert out == "401204  mov eax, [rsp+8]   ; in f"
+
+
 def test_calls_format():
     result = {"func": "f", "ea": 0x401000,
               "callers": [{"ea": 0x401100, "func": "g", "insn": "call f"}],
@@ -321,6 +328,19 @@ def test_strrefs_format():
     ]})
     assert "401500" in out and "in check" in out and '"license expired"' in out
     assert fmt_xrefs.format_strrefs({"pattern": "zzz", "data": []}) == "(no refs to strings matching 'zzz')"
+
+
+def test_calls_squashes_disasm_operand_padding():
+    out = fmt_xrefs.format_calls({"func": "f", "ea": 0x401000, "callers": [
+        {"ea": 0x401100, "func": "g", "insn": "call    f", "depth": 1}], "callees": []})
+    assert "call f" in out and "call    f" not in out
+
+
+def test_strrefs_squashes_disasm_operand_padding():
+    out = fmt_xrefs.format_strrefs({"pattern": "lic", "data": [
+        {"ea": 0x401500, "kind": "offset", "func": "check",
+         "insn": "lea     rax, aLicense", "str_ea": 0x9000, "str": "license expired"}]})
+    assert "lea rax, aLicense" in out and "lea     rax" not in out
 
 
 def test_type_value_overlay_format():

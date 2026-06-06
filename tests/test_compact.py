@@ -2,7 +2,7 @@
 
 import pytest
 
-from idb.fmt.compact import shorten, squash_disas
+from idb.fmt.compact import shorten, squash_disas, squash_insn
 
 
 def test_shorten_width_named_integers():
@@ -51,3 +51,12 @@ def test_squash_disas_keeps_address_bytes_intact():
 
 def test_squash_disas_squashes_header_lines():
     assert squash_disas("sub_X  (.text @ 0x401000):") == "sub_X (.text @ 0x401000):"
+
+
+def test_squash_insn_collapses_operand_padding():
+    assert squash_insn("mov     [rsp+8], r8") == "mov [rsp+8], r8"
+    assert squash_insn("call    sub_401300") == "call sub_401300"
+
+
+def test_squash_insn_is_noop_on_already_tight_text():
+    assert squash_insn("call sub_401300") == "call sub_401300"

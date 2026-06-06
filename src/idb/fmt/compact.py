@@ -58,6 +58,14 @@ def _squash_spaces(s):
     return re.sub(r"(\S)  +", r"\1 ", s)
 
 
+def squash_insn(text):
+    """Squash one instruction cell's operand-alignment padding to single spaces.
+    For per-field use in row/table formatters (xrefs/calls/strrefs/search) where the
+    surrounding address and direction columns must stay aligned, so only the disasm
+    cell is collapsed — never the leading address gutter or indentation."""
+    return _squash_spaces(text)
+
+
 def squash_disas(text):
     """Drop operand-alignment padding and shrink the 2-space gutter separator to one.
     The leading hex address is preserved byte-for-byte, so it still resolves."""
