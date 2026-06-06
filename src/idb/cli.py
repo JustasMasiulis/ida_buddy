@@ -304,7 +304,7 @@ def build_parser():
     sp.add_argument("-k", "--kind", default=None,
                     help="filter by kind (struct/union/enum/pointer/function/array/typedef/scalar)")
     sp.add_argument("--size", default=None,
-                    help="filter by type size in bytes (decimal, or 0x-prefixed hex)")
+                    help="filter by type size in bytes (hex; prefix 0n for decimal)")
     sp = cmd("member", help="member at byte offset (nested path, union arms)",
              ex=("member _EPROCESS 0x2e0",))
     sp.add_argument("type")
@@ -584,14 +584,18 @@ def cmd_open(ns):
     return 0
 
 
-def cmd_sessions(ns):
-    registry.cleanup_stale()
-    rows = [{**e, "status": registry.probe(e) or "dead"} for e in registry.list_all()]
+def _emit_paginated(rows, formatter, ns):
     page, next_offset = _paginate_list(rows, ns.offset, ns.count)
-    print(fmt_sessions.format_sessions(page))
+    print(formatter(page))
     meta = _banner({"shown": len(page), "truncated": True, "next_offset": next_offset}) if next_offset is not None else ""
     if meta:
         print(meta, file=sys.stderr)
+
+
+def cmd_sessions(ns):
+    registry.cleanup_stale()
+    rows = [{**e, "status": registry.probe(e) or "dead"} for e in registry.list_all()]
+    _emit_paginated(rows, fmt_sessions.format_sessions, ns)
     return 0
 
 
@@ -642,11 +646,7 @@ def cmd_close(ns):
 
 def cmd_doctor(ns):
     rows, ok = doctor_mod.run()
-    page, next_offset = _paginate_list(rows, ns.offset, ns.count)
-    print(fmt_sessions.format_doctor(page))
-    meta = _banner({"shown": len(page), "truncated": True, "next_offset": next_offset}) if next_offset is not None else ""
-    if meta:
-        print(meta, file=sys.stderr)
+    _emit_paginated(rows, fmt_sessions.format_doctor, ns)
     return 0 if ok else 1
 
 
