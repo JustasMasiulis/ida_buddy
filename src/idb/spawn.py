@@ -98,12 +98,8 @@ def kill_pid(pid) -> bool:
         return False
 
 
-def _client(entry):
-    return ZmqClient(entry["port"], entry["token"])
-
-
 def _fetch_summary(entry, timeout_s):
-    client = _client(entry)
+    client = ZmqClient(entry["port"], entry["token"])
     try:
         reply = client.call("open_summary", {}, timeout_ms=int(timeout_s * 1000))
     finally:
