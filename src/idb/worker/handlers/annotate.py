@@ -28,11 +28,8 @@ def rename(addr, name):
         ea = None
     if ea is None and ":" in addr:
         func, _, var = addr.partition(":")
-        f = ida_funcs.get_func(idahelp.resolve_target(func))
-        if f is None:
-            raise IdbError(protocol.NOT_FOUND, f"no function {func!r}")
-        if not ida_hexrays.init_hexrays_plugin():
-            raise IdbError(protocol.IDA_ERROR, "Hex-Rays is required to rename a local variable")
+        f = idahelp.require_func(func)
+        idahelp.require_hexrays("Hex-Rays is required to rename a local variable")
         if not ida_hexrays.rename_lvar(f.start_ea, var, name):
             raise IdbError(protocol.IDA_ERROR, f"could not rename local {var!r} (unknown name?)")
         return {"target": addr, "name": name, "kind": "lvar"}
@@ -99,9 +96,7 @@ def op(addr, fmt, opnum=None):
     `enum:NAME` resolves the enum tid via get_named_type_tid. The disassembly setters
     propagate into the Hex-Rays pseudocode for char/enum/num (the decompiler manages
     its own number radix), so we mark the enclosing function dirty to refresh it."""
-    ea = idahelp.resolve_target(addr)
-    if not ida_bytes.is_mapped(ea):
-        raise IdbError(protocol.BAD_ADDRESS, f"address {ea:#x} is not mapped")
+    ea = idahelp.resolve_mapped(addr)
     n = opnum if opnum is not None else ida_bytes.OPND_ALL
     if fmt.startswith("enum:"):
         name = fmt[len("enum:"):]
@@ -137,8 +132,7 @@ def patch(addr, hex):
         raise IdbError(protocol.BAD_ARGS, "patch bytes must be hex (e.g. '90 90' or '9090')")
     if not data:
         raise IdbError(protocol.BAD_ARGS, "empty patch")
-    if not ida_bytes.is_mapped(ea):
-        raise IdbError(protocol.BAD_ADDRESS, f"address {ea:#x} is not mapped")
+    idahelp.require_mapped(ea)
     ida_bytes.patch_bytes(ea, data)
     return {"ea": ea, "count": len(data), "bytes": data}
 

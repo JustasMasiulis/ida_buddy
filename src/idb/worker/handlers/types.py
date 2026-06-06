@@ -74,6 +74,10 @@ def _named(name):
 
 
 def _parse_int(value):
+    # Member selectors are name-OR-offset: bare digits stay DECIMAL here so a hex-looking
+    # member NAME (e.g. "f0") still falls through to name lookup in _member_index. A byte
+    # offset that wants hex passes the 0x prefix. (The `member` byte_off arg, which is never
+    # a name, uses idahelp.parse_addr instead so it follows the bare-hex address convention.)
     s = str(value)
     return int(s, 16) if s.lower().startswith("0x") else int(s, 10)
 
@@ -116,8 +120,8 @@ def types(pattern=None, kind=None, size=None, offset=0, count=None, total=False)
     want_size = None
     if size is not None:
         try:
-            want_size = _parse_int(size)
-        except ValueError:
+            want_size = idahelp.parse_addr(size)  # bare hex, 0n for decimal (windbg convention)
+        except IdbError:
             raise IdbError(protocol.BAD_ARGS, f"--size must be an integer: {size!r}")
 
     def matches(tif, name):
@@ -138,9 +142,7 @@ def types(pattern=None, kind=None, size=None, offset=0, count=None, total=False)
         if filtered:
             yield from _iter_library_types(matches)
 
-    items, next_offset = idahelp.paginate(rows(), offset, count if count else _LIST_DEFAULT)
-    total_count = sum(1 for _ in rows()) if total else None
-    return {"data": items}, idahelp.page_meta(items, next_offset, total_count)
+    return idahelp.paged(rows, offset, count, total, default=_LIST_DEFAULT)
 
 
 def _iter_local_types(matches):
@@ -242,7 +244,7 @@ def _walk(tif, off, prefix, paths, depth=0):
 
 @handler("member")
 def member(type, offset, page_offset=0, count=None):
-    off = _parse_int(offset)
+    off = idahelp.parse_addr(offset)
     tif = _named(type)
     if not (tif.is_struct() or tif.is_union()):
         raise IdbError(protocol.BAD_ARGS, f"{type!r} is not a struct or union")
@@ -255,10 +257,7 @@ def member(type, offset, page_offset=0, count=None):
 
 
 def _typeof_lvar(func, var):
-    ea = idahelp.resolve_target(func)
-    f = ida_funcs.get_func(ea)
-    if f is None:
-        raise IdbError(protocol.NOT_FOUND, f"no function {func!r}")
+    f = idahelp.require_func(func)
     import ida_hexrays
 
     if ida_hexrays.init_hexrays_plugin():
@@ -311,10 +310,7 @@ def typeof(target):
 
 @handler("frame")
 def frame(func, offset=0, count=None):
-    ea = idahelp.resolve_target(func)
-    f = ida_funcs.get_func(ea)
-    if f is None:
-        raise IdbError(protocol.NOT_FOUND, f"no function at {func!r}")
+    f = idahelp.require_func(func)
     ftif = T.tinfo_t()
     if not ftif.get_func_frame(f):
         raise IdbError(protocol.IDA_ERROR, f"no stack frame for {func!r}")
@@ -381,9 +377,7 @@ def _hexrays_lvar(func_start, var):
 
 
 def _settype_local(func, var, new_type):
-    f = ida_funcs.get_func(idahelp.resolve_target(func))
-    if f is None:
-        raise IdbError(protocol.NOT_FOUND, f"no function {func!r}")
+    f = idahelp.require_func(func)
     import ida_hexrays
 
     cfunc, lv = _hexrays_lvar(f.start_ea, var)
@@ -428,11 +422,8 @@ def setlvar(func, var, name=None, type=None):
 
     if not name and not type:
         raise IdbError(protocol.BAD_ARGS, "setlvar needs --name and/or --type")
-    f = ida_funcs.get_func(idahelp.resolve_target(func))
-    if f is None:
-        raise IdbError(protocol.NOT_FOUND, f"no function {func!r}")
-    if not ida_hexrays.init_hexrays_plugin():
-        raise IdbError(protocol.IDA_ERROR, "Hex-Rays is required for setlvar")
+    f = idahelp.require_func(func)
+    idahelp.require_hexrays("Hex-Rays is required for setlvar")
     cfunc, lv = _hexrays_lvar(f.start_ea, var)
     if lv is None:
         raise IdbError(protocol.NOT_FOUND, f"no local variable {var!r} in {func!r}")
@@ -704,11 +695,8 @@ def union_select(addr, member):
     import ida_pro
 
     ea = idahelp.resolve_target(addr)
-    f = ida_funcs.get_func(ea)
-    if f is None:
-        raise IdbError(protocol.NOT_FOUND, f"no function contains {addr!r}")
-    if not ida_hexrays.init_hexrays_plugin():
-        raise IdbError(protocol.IDA_ERROR, "Hex-Rays is required for union-select")
+    f = idahelp.require_func(addr, f"no function contains {addr!r}")
+    idahelp.require_hexrays("Hex-Rays is required for union-select")
     # Locate the union access on a fresh ctree: a cached cfunc can place the
     # access at a stale spot after a referenced struct or callee retype, so the
     # selection would be keyed to the wrong site.

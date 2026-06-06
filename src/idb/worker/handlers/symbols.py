@@ -11,14 +11,8 @@ from idb.worker.dispatch import handler
 _LIST_DEFAULT = 200
 
 
-def _cap(count):
-    return count if count else _LIST_DEFAULT
-
-
 def _result(make_gen, offset, count, total=False):
-    items, next_offset = idahelp.paginate(make_gen(), offset, _cap(count))
-    total_count = sum(1 for _ in make_gen()) if total else None
-    return {"data": items}, idahelp.page_meta(items, next_offset, total_count)
+    return idahelp.paged(make_gen, offset, count, total, default=_LIST_DEFAULT)
 
 
 @handler("funcs")

@@ -132,10 +132,7 @@ _CALLER_CEILING = 2000
 
 @handler("calls")
 def calls(func, depth=1, offset=0, count=None):
-    ea = idahelp.resolve_target(func)
-    f = ida_funcs.get_func(ea)
-    if f is None:
-        raise IdbError(protocol.NOT_FOUND, f"no function at {func!r}")
+    f = idahelp.require_func(func)
     start = f.start_ea
     depth = max(1, int(depth))
 

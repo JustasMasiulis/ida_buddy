@@ -5,7 +5,6 @@ import ida_funcs
 import ida_ida
 import ida_name
 import ida_nalt
-import ida_segment
 import ida_typeinf
 from ida_idaapi import BADADDR
 
@@ -68,11 +67,8 @@ def read(addr, width=1, count=None, offset=0):
     width = width or 1
     if width not in (1, 2, 4, 8):
         raise IdbError(protocol.BAD_ARGS, "width must be 1, 2, 4, or 8")
-    ea = idahelp.resolve_target(addr) + (offset or 0) * width
-    if not ida_bytes.is_mapped(ea):
-        raise IdbError(protocol.BAD_ADDRESS, f"address {ea:#x} is not mapped")
-    seg = ida_segment.getseg(ea)
-    seg_end = seg.end_ea if seg else ida_ida.inf_get_max_ea()
+    ea = idahelp.resolve_mapped(addr, offset, width)
+    seg_end = idahelp.segment_end(ea)
 
     if width == 1:
         total = max(0, min(count if count else 64, seg_end - ea))
@@ -117,9 +113,7 @@ def _counted_string_type(ea):
 
 @handler("string")
 def string(addr, encoding=None):
-    ea = idahelp.resolve_target(addr)
-    if not ida_bytes.is_mapped(ea):
-        raise IdbError(protocol.BAD_ADDRESS, f"address {ea:#x} is not mapped")
+    ea = idahelp.resolve_mapped(addr)
     if encoding == "ascii":
         strtype = ida_nalt.STRTYPE_C
     elif encoding == "utf16":
@@ -149,8 +143,7 @@ def string(addr, encoding=None):
                             f"`{hint}` to read it directly."}
         # A windbg da/du shows memory whatever the type, so dump 16 bytes with an
         # ascii/utf16 side column rather than failing.
-        seg = ida_segment.getseg(ea)
-        seg_end = seg.end_ea if seg else ida_ida.inf_get_max_ea()
+        seg_end = idahelp.segment_end(ea)
         total = max(0, min(16, seg_end - ea))
         data = ida_bytes.get_bytes(ea, total)
         if data is None:
@@ -168,11 +161,8 @@ def string(addr, encoding=None):
 @handler("pointers")
 def pointers(addr, count=None, offset=0):
     width = _ptr_size()
-    ea = idahelp.resolve_target(addr) + (offset or 0) * width
-    if not ida_bytes.is_mapped(ea):
-        raise IdbError(protocol.BAD_ADDRESS, f"address {ea:#x} is not mapped")
-    seg = ida_segment.getseg(ea)
-    seg_end = seg.end_ea if seg else ida_ida.inf_get_max_ea()
+    ea = idahelp.resolve_mapped(addr, offset, width)
+    seg_end = idahelp.segment_end(ea)
     getter = _GETTERS[width]
     rows, cur = [], ea
     for _ in range(count if count else 16):
@@ -187,9 +177,7 @@ def pointers(addr, count=None, offset=0):
 
 @handler("string_struct")
 def string_struct(addr, wide=False):
-    ea = idahelp.resolve_target(addr)
-    if not ida_bytes.is_mapped(ea):
-        raise IdbError(protocol.BAD_ADDRESS, f"address {ea:#x} is not mapped")
+    ea = idahelp.resolve_mapped(addr)
     ptr = _ptr_size()
     length = ida_bytes.get_word(ea)
     maxlen = ida_bytes.get_word(ea + 2)

@@ -22,8 +22,7 @@ import ida_typeinf as T
 import ida_xref
 import idautils
 
-from idb import protocol, triage as pure
-from idb.errors import IdbError
+from idb import triage as pure
 from idb.worker import hexcalls, idahelp
 from idb.worker.budget import Budget
 from idb.worker.dispatch import handler
@@ -353,10 +352,7 @@ def _harvest_args(start, budget):
 @handler("triage")
 def triage(func):
     budget = Budget(TRIAGE_BUDGET_S)
-    ea = idahelp.resolve_target(func)
-    f = ida_funcs.get_func(ea)
-    if f is None:
-        raise IdbError(protocol.NOT_FOUND, f"no function at {func!r}")
+    f = idahelp.require_func(func)
     start = f.start_ea
 
     tif, proto_source = _func_tinfo(start)

@@ -111,3 +111,74 @@ def func_name_at(ea):
 
     f = ida_funcs.get_func(ea)
     return ida_funcs.get_func_name(f.start_ea) if f else None
+
+
+def require_func(target, msg=None):
+    """Resolve `target` to a function, raising NOT_FOUND if there is none. The
+    message differs by call site (most say 'no function at X', a few 'no function
+    X'), so pass `msg` to keep it byte-identical."""
+    import ida_funcs
+
+    ea = resolve_target(target)
+    f = ida_funcs.get_func(ea)
+    if f is None:
+        raise IdbError(protocol.NOT_FOUND, msg or f"no function at {target!r}")
+    return f
+
+
+def require_mapped(ea):
+    """Raise BAD_ADDRESS unless `ea` is a mapped address; return it otherwise."""
+    import ida_bytes
+
+    if not ida_bytes.is_mapped(ea):
+        raise IdbError(protocol.BAD_ADDRESS, f"address {ea:#x} is not mapped")
+    return ea
+
+
+def resolve_mapped(addr, offset=0, width=1):
+    """Resolve `addr` (+ offset*width) to a mapped ea or raise BAD_ADDRESS."""
+    return require_mapped(resolve_target(addr) + (offset or 0) * width)
+
+
+def segment_end(ea):
+    """End ea of the segment containing `ea`, or the database max ea if none."""
+    import ida_segment
+    import ida_ida
+
+    seg = ida_segment.getseg(ea)
+    return seg.end_ea if seg else ida_ida.inf_get_max_ea()
+
+
+def require_hexrays(msg):
+    """Initialize the Hex-Rays plugin or raise IDA_ERROR with `msg` (which varies
+    by call site)."""
+    import ida_hexrays
+
+    if not ida_hexrays.init_hexrays_plugin():
+        raise IdbError(protocol.IDA_ERROR, msg)
+
+
+def safe_decompile(ea):
+    """Decompile `ea` fresh (the cache is not invalidated on callee/struct retype),
+    raising IDA_ERROR on failure or a null result. Use only at sites whose policy
+    is to raise; loop sites that `continue` and `(None, None)` sites stay inline."""
+    import ida_hexrays
+
+    ida_hexrays.mark_cfunc_dirty(ea)
+    try:
+        cfunc = ida_hexrays.decompile(ea)
+    except ida_hexrays.DecompilationFailure as exc:
+        raise IdbError(protocol.IDA_ERROR, f"decompilation failed: {exc}")
+    if cfunc is None:
+        raise IdbError(protocol.IDA_ERROR, "decompilation returned null")
+    return cfunc
+
+
+def paged(make_gen, offset, count, total=False, default=None):
+    """Paginate a freshly-built generator and wrap it in the listing envelope.
+    `make_gen` is called once for the page and again (when `total`) for the count,
+    so it must yield a fresh iterator each call. `default` caps an unset `count`."""
+    n = count if count else default
+    items, next_offset = paginate(make_gen(), offset, n)
+    total_count = sum(1 for _ in make_gen()) if total else None
+    return {"data": items}, page_meta(items, next_offset, total_count)

@@ -6,12 +6,9 @@ import ida_funcs
 import ida_lines
 import ida_segment
 import ida_ida
-import ida_hexrays
 import idautils
 from ida_idaapi import BADADDR
 
-from idb import protocol
-from idb.errors import IdbError
 from idb.worker import idahelp
 from idb.worker.dispatch import handler
 
@@ -54,9 +51,7 @@ def _walk(ea):
 
 @handler("disas")
 def disas(target, count=None, offset=0, whole=False):
-    ea = idahelp.resolve_target(target)
-    if not ida_bytes.is_mapped(ea):
-        raise IdbError(protocol.BAD_ADDRESS, f"address {ea:#x} is not mapped")
+    ea = idahelp.resolve_mapped(target)
     f = ida_funcs.get_func(ea)
     if whole and f is not None and count is None:
         gen = (_line(e) for e in idautils.FuncItems(f.start_ea))
@@ -72,21 +67,9 @@ def disas(target, count=None, offset=0, whole=False):
 
 @handler("decompile")
 def decompile(func, offset=0, count=None):
-    ea = idahelp.resolve_target(func)
-    if not ida_hexrays.init_hexrays_plugin():
-        raise IdbError(protocol.IDA_ERROR, "Hex-Rays decompiler is not available (no license)")
-    f = ida_funcs.get_func(ea)
-    if f is None:
-        raise IdbError(protocol.NOT_FOUND, f"no function at {func!r}")
-    # The cache is not invalidated when a callee's prototype or a referenced
-    # struct changes, so cached pseudocode shows stale types. Force a fresh run.
-    ida_hexrays.mark_cfunc_dirty(f.start_ea)
-    try:
-        cfunc = ida_hexrays.decompile(f.start_ea)
-    except ida_hexrays.DecompilationFailure as exc:
-        raise IdbError(protocol.IDA_ERROR, f"decompilation failed: {exc}")
-    if cfunc is None:
-        raise IdbError(protocol.IDA_ERROR, "decompilation returned null")
+    idahelp.require_hexrays("Hex-Rays decompiler is not available (no license)")
+    f = idahelp.require_func(func)
+    cfunc = idahelp.safe_decompile(f.start_ea)
     lines = (ida_lines.tag_remove(sl.line) for sl in cfunc.get_pseudocode())
     items, next_offset = idahelp.paginate(lines, offset, count)
     return ({"func": ida_funcs.get_func_name(f.start_ea), "ea": f.start_ea, "lines": items},

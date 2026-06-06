@@ -52,3 +52,25 @@ def test_page_meta():
     assert idahelp.page_meta([1, 2, 3], None) is None
     assert idahelp.page_meta([1, 2, 3], 3) == {"shown": 3, "truncated": True, "next_offset": 3}
     assert idahelp.page_meta([1, 2, 3], None, total=10) == {"shown": 3, "total": 10}
+
+
+def test_paged_envelope():
+    result, meta = idahelp.paged(lambda: iter(range(10)), 0, 3)
+    assert result == {"data": [0, 1, 2]}
+    assert meta == {"shown": 3, "truncated": True, "next_offset": 3}
+
+
+def test_paged_default_cap():
+    result, meta = idahelp.paged(lambda: iter(range(5)), 0, None, default=2)
+    assert result["data"] == [0, 1] and meta["next_offset"] == 2
+
+
+def test_paged_total_rebuilds_generator():
+    result, meta = idahelp.paged(lambda: iter(range(10)), 0, 3, total=True)
+    assert result["data"] == [0, 1, 2]
+    assert meta["total"] == 10 and meta["next_offset"] == 3
+
+
+def test_paged_no_truncation_no_meta():
+    result, meta = idahelp.paged(lambda: iter([1, 2]), 0, None)
+    assert result == {"data": [1, 2]} and meta is None
