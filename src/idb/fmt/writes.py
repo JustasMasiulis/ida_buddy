@@ -1,10 +1,10 @@
 """Terse confirmations for mutating commands."""
 
+from .compact import escape_text
 
-def _clip(text, limit=60):
-    """One-line, length-capped echo of free text that could be arbitrarily long."""
-    flat = str(text).replace("\r", "\\r").replace("\n", "\\n").replace("\t", "\\t")
-    return flat if len(flat) <= limit else flat[: limit - 1] + "…"
+
+def _views(result):
+    return "disasm+pseudo" if result.get("pseudocode") else "disasm"
 
 
 def format_rename(result, ns=None):
@@ -14,14 +14,12 @@ def format_rename(result, ns=None):
 
 
 def format_comment(result, ns=None):
-    views = "disasm+pseudo" if result.get("pseudocode") else "disasm"
-    return f"comment {result['ea']:x} ({views}): {_clip(result['comment'])}"
+    return f"comment {result['ea']:x} ({_views(result)}): {escape_text(result['comment'], 60)}"
 
 
 def format_op(result, ns=None):
-    views = "disasm+pseudo" if result.get("pseudocode") else "disasm"
     where = f" op{result['opnum']}" if result.get("opnum") is not None else ""
-    return f"op {result['ea']:x}{where} -> {_clip(result['repr'])} ({views})"
+    return f"op {result['ea']:x}{where} -> {escape_text(result['repr'], 60)} ({_views(result)})"
 
 
 def format_patch(result, ns=None):

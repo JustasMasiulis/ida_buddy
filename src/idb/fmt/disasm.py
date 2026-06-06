@@ -1,10 +1,6 @@
 """disas / decompile formatters."""
 
-from .compact import shorten, squash_disas
-
-
-def _addr_width(lines):
-    return max((len(f"{ln['ea']:x}") for ln in lines), default=8)
+from .compact import hex_width, shorten, squash_disas
 
 
 def format_disas(result, ns=None):
@@ -13,7 +9,7 @@ def format_disas(result, ns=None):
     f = result.get("func")
     if result.get("mode") == "func" and f:
         out.append(f"{f['name']}  ({f['seg']} @ {f['start']:x}):")
-    width = _addr_width(lines)
+    width = hex_width(ln["ea"] for ln in lines)
     for ln in lines:
         row = f"{ln['ea']:0{width}x}  {ln['text']}"
         if ln.get("comment"):

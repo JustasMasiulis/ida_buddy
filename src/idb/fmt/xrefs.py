@@ -1,14 +1,10 @@
 """xref_to / xref_from / calls / search formatters."""
 
-from .compact import squash_insn
-
-
-def _addr_width(rows):
-    return max((len(f"{r['ea']:x}") for r in rows), default=8)
+from .compact import hex_width, squash_insn
 
 
 def _ctx_lines(rows):
-    width = _addr_width(rows)
+    width = hex_width(r["ea"] for r in rows)
     show_dir = any("dir" in r for r in rows)
     out = []
     for r in rows:
@@ -53,7 +49,7 @@ def format_strrefs(result, ns=None):
     rows = result.get("data", [])
     if not rows:
         return f"(no refs to strings matching {result.get('pattern', '')!r})"
-    width = _addr_width(rows)
+    width = hex_width(r["ea"] for r in rows)
     out = []
     for r in rows:
         line = f"{r['ea']:0{width}x}  {squash_insn(r['insn'])}"

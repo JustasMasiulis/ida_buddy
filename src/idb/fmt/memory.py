@@ -1,5 +1,7 @@
 """read (hexdump / grouped values) and string formatters."""
 
+from .compact import escape_text, hex_width
+
 _HEXW = 16 * 3 - 1  # "xx xx ... xx" with one byte's space replaced by the hyphen
 
 
@@ -14,7 +16,7 @@ def _utf16_gutter(chunk):
 
 def _hexdump(base, data, gutter=_ascii_gutter):
     offsets = range(0, len(data), 16)
-    aw = max((len(f"{base + off:x}") for off in offsets), default=1)
+    aw = hex_width((base + off for off in offsets), default=1)
     out = []
     for off in offsets:
         chunk = data[off:off + 16]
@@ -29,7 +31,7 @@ def _hexdump(base, data, gutter=_ascii_gutter):
 def _values(base, width, values):
     per_row = max(1, 16 // width)
     starts = range(0, len(values), per_row)
-    aw = max((len(f"{base + i * width:x}") for i in starts), default=1)
+    aw = hex_width((base + i * width for i in starts), default=1)
     out = []
     for i in starts:
         row = values[i:i + per_row]
@@ -50,7 +52,7 @@ def format_string(result, ns=None):
     if result.get("raw_fallback"):  # no string here; windbg-style memory dump
         gutter = _utf16_gutter if result["encoding"] == "utf16" else _ascii_gutter
         return _hexdump(result["addr"], result["bytes"], gutter)
-    text = result["text"].replace("\r", "\\r").replace("\n", "\\n")
+    text = escape_text(result["text"], tabs=False)
     return f'{result["addr"]:x}  {result["encoding"]} {result["length"]} bytes  "{text}"'
 
 
@@ -71,6 +73,6 @@ def format_pointers(result, ns=None):
 
 def format_string_struct(result, ns=None):
     kind = "UNICODE_STRING" if result["wide"] else "ANSI_STRING"
-    text = (result.get("text") or "").replace("\r", "\\r").replace("\n", "\\n")
+    text = escape_text(result.get("text") or "", tabs=False)
     return (f'{result["addr"]:x}  {kind} len={result["length"]} '
             f'max={result["maxlen"]} buf={result["buffer"]:x}  "{text}"')

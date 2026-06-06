@@ -74,3 +74,31 @@ def squash_disas(text):
         m = _DISAS_GUTTER.match(line)
         out.append(m.group(1) + " " + _squash_spaces(m.group(2)) if m else _squash_spaces(line))
     return "\n".join(out)
+
+
+def hx(value):
+    """Compact hex for table cells; command arguments accept bare hex."""
+    return f"{value:x}" if isinstance(value, int) else str(value)
+
+
+def hex_width(values, default=8):
+    """Widest `%x` rendering across `values` (an iterable of ints), for zero-padding
+    a column so every address lines up. `default` is used when `values` is empty."""
+    return max((len(f"{v:x}") for v in values), default=default)
+
+
+def escape_text(text, limit=None, tabs=True):
+    """One-line, optionally length-capped echo of free text. Escapes CR and LF (and
+    TAB unless `tabs=False`); when `limit` is given and the escaped string exceeds it,
+    truncate to `limit-1` chars plus an ellipsis."""
+    flat = str(text).replace("\r", "\\r").replace("\n", "\\n")
+    if tabs:
+        flat = flat.replace("\t", "\\t")
+    if limit is not None and len(flat) > limit:
+        return flat[: limit - 1] + "…"
+    return flat
+
+
+def count(n, truncated):
+    """Render a count, suffixing `+` when the producing phase hit a cap or budget."""
+    return f"{n}+" if truncated else str(n)

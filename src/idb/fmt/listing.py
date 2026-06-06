@@ -5,15 +5,7 @@ import json
 import os
 
 from .columns import align
-
-
-def _h(value):
-    return f"{value:x}" if isinstance(value, int) else str(value)
-
-
-def _th(value):
-    """Compact hex for table cells; command arguments accept bare hex."""
-    return f"{value:x}" if isinstance(value, int) else str(value)
+from .compact import escape_text, hx
 
 
 def format_open_summary(s, ns=None):
@@ -21,8 +13,8 @@ def format_open_summary(s, ns=None):
     lines = [
         f"{s.get('input', '?')}   {s.get('format', '')}",
         f"  arch     {s.get('arch')} {s.get('bitness')}-bit {s.get('endian')}-endian",
-        f"  base     {_h(s.get('base', 0))}   size {_h(size)} ({size} bytes)",
-        f"  range    {_h(s.get('min_ea', 0))} - {_h(s.get('max_ea', 0))}",
+        f"  base     {hx(s.get('base', 0))}   size {hx(size)} ({size} bytes)",
+        f"  range    {hx(s.get('min_ea', 0))} - {hx(s.get('max_ea', 0))}",
     ]
     if s.get("md5"):
         lines.append(f"  md5      {s['md5']}")
@@ -34,7 +26,7 @@ def format_open_summary(s, ns=None):
     )
     eps = s.get("entry_points") or []
     if eps:
-        shown = ", ".join(f"{e['name']}@{_h(e['ea'])}" for e in eps[:4])
+        shown = ", ".join(f"{e['name']}@{hx(e['ea'])}" for e in eps[:4])
         more = f" (+{len(eps) - 4} more)" if len(eps) > 4 else ""
         lines.append(f"  entry    {shown}{more}")
     return "\n".join(lines)
@@ -45,7 +37,7 @@ def format_segments(result, ns=None):
     if not rows:
         return "(no segments)"
     table = [
-        (r["name"], _th(r["start"]), _th(r["end"]), _th(r["size"]), r["perm"], r.get("class", ""))
+        (r["name"], hx(r["start"]), hx(r["end"]), hx(r["size"]), r["perm"], r.get("class", ""))
         for r in rows
     ]
     return align(table, headers=("NAME", "START", "END", "SIZE", "PERM", "CLASS"),
@@ -56,16 +48,11 @@ def format_saved(result, ns=None):
     return f"saved {os.path.basename(result.get('saved') or '')}"
 
 
-def _oneline(text, limit=100):
-    flat = text.replace("\r", "\\r").replace("\n", "\\n").replace("\t", "\\t")
-    return flat if len(flat) <= limit else flat[: limit - 1] + "…"
-
-
 def format_funcs(result, ns=None):
     rows = result.get("data", [])
     if not rows:
         return "(no functions)"
-    table = [(_th(r["ea"]), _th(r["size"]), r["name"]) for r in rows]
+    table = [(hx(r["ea"]), hx(r["size"]), r["name"]) for r in rows]
     return align(table, headers=("ADDR", "SIZE", "NAME"), aligns=(">", ">", "<"))
 
 
@@ -73,7 +60,7 @@ def format_names(result, ns=None):
     rows = result.get("data", [])
     if not rows:
         return "(no names)"
-    return align([(_th(r["ea"]), r["name"]) for r in rows], headers=("ADDR", "NAME"),
+    return align([(hx(r["ea"]), r["name"]) for r in rows], headers=("ADDR", "NAME"),
                  aligns=(">", "<"))
 
 
@@ -81,7 +68,7 @@ def format_imports(result, ns=None):
     rows = result.get("data", [])
     if not rows:
         return "(no imports)"
-    table = [(_th(r["ea"]), r.get("module", ""), r["name"]) for r in rows]
+    table = [(hx(r["ea"]), r.get("module", ""), r["name"]) for r in rows]
     return align(table, headers=("ADDR", "MODULE", "NAME"), aligns=(">", "<", "<"))
 
 
@@ -89,7 +76,7 @@ def format_exports(result, ns=None):
     rows = result.get("data", [])
     if not rows:
         return "(no exports)"
-    table = [(_th(r["ea"]), str(r["ordinal"]), r["name"]) for r in rows]
+    table = [(hx(r["ea"]), str(r["ordinal"]), r["name"]) for r in rows]
     return align(table, headers=("ADDR", "ORD", "NAME"), aligns=(">", ">", "<"))
 
 
@@ -97,7 +84,7 @@ def format_strings(result, ns=None):
     rows = result.get("data", [])
     if not rows:
         return "(no strings)"
-    table = [(_th(r["ea"]), str(r["length"]), _oneline(r["text"])) for r in rows]
+    table = [(hx(r["ea"]), str(r["length"]), escape_text(r["text"], 100)) for r in rows]
     return align(table, headers=("ADDR", "LEN", "STRING"), aligns=(">", ">", "<"))
 
 

@@ -2,28 +2,15 @@
 a trailing `+` on a count means that phase hit its cap or the time budget."""
 
 from .columns import align
-from .compact import shorten
-
-
-def _th(value):
-    return f"{value:x}" if isinstance(value, int) else str(value)
-
-
-def _oneline(text, limit=80):
-    flat = text.replace("\r", "\\r").replace("\n", "\\n").replace("\t", "\\t")
-    return flat if len(flat) <= limit else flat[: limit - 1] + "…"
-
-
-def _count(n, truncated):
-    return f"{n}+" if truncated else str(n)
+from .compact import count, escape_text, hex_width, hx, shorten
 
 
 def _callees_block(result):
     rows = result.get("callees", [])
-    head = f"callees: {_count(result.get('callee_count', len(rows)), result.get('callees_truncated'))}"
+    head = f"callees: {count(result.get('callee_count', len(rows)), result.get('callees_truncated'))}"
     if not rows:
         return head
-    table = [(_th(r["ea"]), _th(r["size"]), str(r["callers"]), r["kind"], r["name"]) for r in rows]
+    table = [(hx(r["ea"]), hx(r["size"]), str(r["callers"]), r["kind"], r["name"]) for r in rows]
     body = align(table, headers=("ADDR", "SIZE", "CALLERS", "KIND", "NAME"),
                  aligns=(">", ">", ">", "<", "<"))
     return head + "\n" + "\n".join("  " + line for line in body.splitlines())
@@ -65,7 +52,7 @@ def _params_block(result):
     rows = result.get("arg_types")
     if not rows:
         return None
-    head = (f"param types: {_count(result.get('arg_caller_count', 0), result.get('arg_types_truncated'))} "
+    head = (f"param types: {count(result.get('arg_caller_count', 0), result.get('arg_types_truncated'))} "
             f"callers   (underlying, before implicit casts)")
     out = [head]
     decls = [shorten(r.get("decl") or "") for r in rows]
@@ -85,13 +72,13 @@ def _params_block(result):
 
 def _strings_block(result):
     rows = result.get("strings", [])
-    head = f"strings: {_count(len(rows), result.get('strings_truncated'))}"
+    head = f"strings: {count(len(rows), result.get('strings_truncated'))}"
     if not rows:
         return None
-    width = max((len(f"{r['str_ea']:x}") for r in rows), default=8)
+    width = hex_width(r["str_ea"] for r in rows)
     out = [head]
     for r in rows:
-        out.append(f'  {r["str_ea"]:0{width}x}  -> "{_oneline(r["text"])}"   ({r["kind"]})')
+        out.append(f'  {r["str_ea"]:0{width}x}  -> "{escape_text(r["text"], 80)}"   ({r["kind"]})')
     return "\n".join(out)
 
 

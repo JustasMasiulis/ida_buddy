@@ -6,11 +6,7 @@ indented lines:
 where the first observed type is the suggestion. A trailing `+` on the scanned
 count means the scan hit its budget or decompile limit."""
 
-from .compact import shorten
-
-
-def _count(n, truncated):
-    return f"{n}+" if truncated else str(n)
+from .compact import count, shorten
 
 
 def _value(f):
@@ -39,7 +35,7 @@ def format_audit_call_types(result, ns=None):
     if result.get("scope"):
         head += f"  scope={result['scope']}"
     findings = result.get("findings", [])
-    head += (f"  scanned {_count(result.get('functions_scanned', 0), result.get('truncated'))}"
+    head += (f"  scanned {count(result.get('functions_scanned', 0), result.get('truncated'))}"
              f"/{result.get('functions_total', 0)} funcs  {result.get('call_sites', 0)} call sites"
              f"  {len(findings)} findings")
 
