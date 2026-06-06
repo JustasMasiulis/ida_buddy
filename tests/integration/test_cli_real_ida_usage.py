@@ -213,11 +213,11 @@ def test_function_triage_workflow_accepts_copied_addresses(cli_session):
     assert re.search(rf"\b{re.escape(addr.lower())}\b", disas.stdout.lower())
 
     whole = _run(env, "uf", addr)
-    assert name in whole.stdout or " @ 0x" in whole.stdout
+    assert name in whole.stdout or " @ " in whole.stdout
     assert len(whole.stdout.splitlines()) >= len(disas.stdout.splitlines())
 
     nearest = _run(env, "ln", addr)
-    assert "0x" in nearest.stdout
+    assert addr.lower() in nearest.stdout.lower()
     assert name in nearest.stdout
 
     calls = _run(env, "calls", addr)
@@ -274,7 +274,7 @@ def test_type_workflow_uses_type_names_from_listing(cli_session):
 
     member = _run(env, "member", name, "0")
     assert name in member.stdout
-    assert "byte 0" in member.stdout
+    assert "@ +0" in member.stdout
 
 
 def _struct_rows(stdout):
