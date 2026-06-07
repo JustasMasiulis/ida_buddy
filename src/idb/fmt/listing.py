@@ -16,6 +16,8 @@ def format_open_summary(s, ns=None):
         f"  base     {hx(s.get('base', 0))}   size {hx(size)} ({size} bytes)",
         f"  range    {hx(s.get('min_ea', 0))} - {hx(s.get('max_ea', 0))}",
     ]
+    if s.get("idb_path"):
+        lines.append(f"  idb      {s['idb_path']}")
     if s.get("md5"):
         lines.append(f"  md5      {s['md5']}")
     if s.get("sha256"):

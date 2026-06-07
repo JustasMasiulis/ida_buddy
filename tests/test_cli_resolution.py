@@ -350,6 +350,29 @@ def test_close_positional_with_all_rejected():
     assert ei.value.code == protocol.BAD_ARGS
 
 
+def test_close_kill_reports_failure(monkeypatch):
+    entry = {"id": "dead", "port": 1, "token": "t", "pid": 1234}
+    unregistered = []
+    monkeypatch.setattr(cli.spawn, "kill_pid", lambda pid: False)
+    monkeypatch.setattr(registry, "unregister", unregistered.append)
+
+    with pytest.raises(IdbError) as ei:
+        cli._close_one(entry, kill=True, save=True)
+
+    assert ei.value.code == protocol.IDA_ERROR
+    assert unregistered == []
+
+
+def test_close_kill_unregisters_after_success(monkeypatch):
+    entry = {"id": "dead", "port": 1, "token": "t", "pid": 1234}
+    unregistered = []
+    monkeypatch.setattr(cli.spawn, "kill_pid", lambda pid: True)
+    monkeypatch.setattr(registry, "unregister", unregistered.append)
+
+    assert cli._close_one(entry, kill=True, save=True) == "killed dead (pid 1234)"
+    assert unregistered == ["dead"]
+
+
 def test_help_alias_prints_root_help(capsys):
     assert cli.main(["help"]) == 0
     assert "usage: idb" in capsys.readouterr().out

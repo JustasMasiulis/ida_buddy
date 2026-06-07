@@ -13,6 +13,7 @@ _SUMMARY = {
     "arch": "metapc", "bitness": 64, "endian": "little", "base": 0x140000000,
     "min_ea": 0x140001000, "max_ea": 0x14000E000, "size": 0xD000,
     "md5": "8066fe09b1f19ba7752896c2fd68b04c", "sha256": "f51f",
+    "idb_path": r"C:\work\where.exe.i64",
     "num_functions": 103, "num_globals": 186, "num_segments": 7,
     "entry_points": [{"ea": 0x140001300, "name": "wmainCRTStartup"}],
 }
@@ -50,6 +51,7 @@ def test_open_summary_lines():
     lines = out.splitlines()
     assert lines[0] == "where.exe   Portable executable for AMD64 (PE)"
     assert "arch     metapc 64-bit little-endian" in out
+    assert r"idb      C:\work\where.exe.i64" in out
     assert "base     140000000   size d000 (53248 bytes)" in out
     assert "md5      8066fe09b1f19ba7752896c2fd68b04c" in out
     assert "segments 7   functions 103   named globals 186" in out
@@ -76,7 +78,7 @@ def test_listing_tables_use_bare_hex():
 
 
 def test_sessions_table():
-    rows = [{"id": "s1", "status": "ready", "pid": 100, "port": 5000, "input_path": r"C:\b\x.exe"}]
+    rows = [{"id": "s1", "status": "ready", "pid": 100, "port": 5000, "input_path": r"C:\b\x.exe", "idb_path": r"C:\b\x.exe.i64"}]
     out = fmt_sessions.format_sessions(rows)
     lines = out.splitlines()
     assert lines[0].split() == ["SESSION", "STATUS", "PID", "PORT", "INPUT"]

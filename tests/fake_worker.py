@@ -20,6 +20,7 @@ _SUMMARY = {
     "endian": "little", "base": 0x140000000, "min_ea": 0x140001000,
     "max_ea": 0x140002000, "size": 0x1000, "md5": None, "sha256": None,
     "num_functions": 1, "num_globals": 0, "num_segments": 1, "entry_points": [],
+    "idb_path": r"C:\fake\thing.exe.i64",
 }
 
 
