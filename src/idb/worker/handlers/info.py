@@ -55,6 +55,7 @@ def _compute_summary():
         "input": ida_nalt.get_root_filename(),
         "path": ida_nalt.get_input_file_path(),
         "format": ida_loader.get_file_type_name(),
+        "idb_path": idc.get_idb_path(),
         "arch": ida_ida.inf_get_procname(),
         "bitness": ida_ida.inf_get_app_bitness(),
         "endian": "big" if ida_ida.inf_is_be() else "little",

@@ -604,14 +604,16 @@ def _close_one(entry, kill, save, timeout_s=20.0):
 
     sid, pid = entry["id"], entry.get("pid")
     if kill:
-        spawn.kill_pid(pid)
+        if not spawn.kill_pid(pid):
+            raise IdbError(protocol.IDA_ERROR, f"could not kill {sid} (pid {pid})")
         registry.unregister(sid)
         return f"killed {sid} (pid {pid})"
     client = ZmqClient(entry["port"], entry["token"])
     try:
         client.call("shutdown", {"save": save}, timeout_ms=15000)
     except IdbError:
-        spawn.kill_pid(pid)
+        if not spawn.kill_pid(pid):
+            raise IdbError(protocol.IDA_ERROR, f"{sid} unreachable; could not kill pid {pid}")
         registry.unregister(sid)
         return f"{sid} unreachable; killed"
     finally:
