@@ -41,8 +41,8 @@ Aliases in parens. `[mut]` mutates the database (creates an undo point).
 | `funcs [pat]` / `names <pat>` (`x`) / `nearest <addr>` (`ln`) | symbols |
 | `eval <expr>` (`?`) | arithmetic/bitwise calc + name lookup; `+%`/`-%`/`*%` wrap (`-w` width); result as hex / `0n`-dec (signed+unsigned) / ascii |
 | `imports [pat]` / `exports [pat]` / `strings [pat]` | imports / entry points / strings |
-| `disas <target>` (`u`, `uf`) | whole function, or `-n N` insns from an address |
-| `decompile <func>` (`dec`) | Hex-Rays pseudocode |
+| `disas <target>` (`u`, `uf`) | whole function, or `-n N` insns starting at an address target; `-o` is pagination offset, not an address |
+| `decompile <func>` (`dec`) | Hex-Rays pseudocode; if output is noisy, improve types or use `triage` to narrow scope first |
 | `read <addr>` (`db`/`dw`/`dd`/`dq`) | dump cells (`-w 1\|2\|4\|8`, `-n N`) |
 | `pointers <addr>` (`dps`/`dqs`) | dump pointers and nearest symbols |
 | `string <addr>` (`da`/`du`) / `string_struct <addr>` (`ds`/`dS`) | raw strings and counted ANSI/UNICODE_STRING-style structs |
@@ -114,6 +114,7 @@ idb ln 0x401037
 idb eval (1<<12) - 1
 idb ? 0x401000 + 8
 idb disas sub_401000 -n 16
+idb disas 0x401740 -n 32  # start at an address; do not pass the address via -o
 idb uf 0x401000
 idb decompile sub_401000
 idb dec main
@@ -179,6 +180,12 @@ prefixes decimal; a symbol name resolves to its address.
 **Data goes to stdout**; banners, errors, and
 `[+more]` truncation notices go to **stderr** (never ingested as data).
 Sequence-style output paginates with `-o/--offset` + `-n/--count`.
+For `disas`, the target itself may be a symbol or address (`idb disas 0x401740 -n 32`).
+Use `-o/--offset` only to resume paginated output after a `[+more]` notice.
+
+When decompiler output is dominated by scaffolding, improve known types first
+(`type`, `declare`, `settype`, `setlvar`) where possible. Then use `triage <func>`
+and focused `disas` windows to inspect only the code that still matters.
 
 ### Exit codes
 
