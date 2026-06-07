@@ -60,8 +60,7 @@ def format_names(result, ns=None):
     rows = result.get("data", [])
     if not rows:
         return "(no names)"
-    return align([(hx(r["ea"]), r["name"]) for r in rows], headers=("ADDR", "NAME"),
-                 aligns=(">", "<"))
+    return align([(hx(r["ea"]), r["name"]) for r in rows], aligns=(">", "<"))
 
 
 def format_imports(result, ns=None):
