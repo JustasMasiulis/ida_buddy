@@ -287,7 +287,7 @@ def build_parser():
     sp = cmd("strrefs", help="xrefs to strings matching a pattern", ex=("strrefs license",))
     sp.add_argument("pattern")
     sp = cmd("search", help="search bytes/imm/str/ref (alias: s)",
-             ex=("search 90 90 -k bytes", 's GetProcAddress -k str'))
+             ex=('search "90 90" -k bytes', 's GetProcAddress -k str'))
     sp.add_argument("pattern")
     sp.add_argument("-k", "--kind", choices=("bytes", "imm", "str", "ref"), default="bytes")
 
@@ -363,7 +363,8 @@ def build_parser():
     sp.add_argument("name")
     sp.add_argument("members", help="k=v,k=v,...")
     sp.add_argument("--bitfield", action="store_true")
-    sp = cmd("patch", help="patch bytes [mut]", ex=("patch 0x401037 90 90",))
+    sp = cmd("patch", help="patch bytes [mut]",
+             ex=("patch 0x401037 9090", 'patch 0x401037 "90 90"'))
     sp.add_argument("addr")
     sp.add_argument("hex")
     cmd("undo", help="revert last mutation [mut]", ex=("undo",))
@@ -567,6 +568,17 @@ def run_remote(ns, rpc_cmd, rpc_args):
     timeout = ns.timeout if ns.timeout else DEFAULT_TIMEOUT
     try:
         reply = client.call(rpc_cmd, rpc_args, timeout_ms=int(timeout * 1000))
+    except IdbError as exc:
+        # The REP loop is serial: a timeout usually means another (or a long)
+        # request is in flight, not a dead worker. Say so before someone
+        # reaches for `close --kill` on a healthy session.
+        if exc.code == protocol.TIMEOUT and registry.pid_alive(entry.get("pid")):
+            raise IdbError(
+                protocol.TIMEOUT,
+                f"{exc.message}; worker {entry['id']} is alive but busy "
+                "(likely serving a long request) — retry or raise -t",
+            ) from exc
+        raise
     finally:
         client.close()
     return emit(rpc_cmd, reply, ns)
@@ -621,6 +633,11 @@ def _close_one(entry, kill, save, timeout_s=20.0):
     deadline = time.time() + timeout_s
     while time.time() < deadline and registry.pid_alive(pid):
         time.sleep(0.1)
+    if registry.pid_alive(pid):
+        # Still saving (large .i64). The entry must outlive the save so a
+        # concurrent `idb open` cannot spawn a second worker over it; the
+        # worker unregisters itself once close_database finishes.
+        return f"{sid} shutting down; still saving (pid {pid}); it will clear its session entry when done"
     registry.unregister(sid)
     return f"closed {sid} (save={save})"
 

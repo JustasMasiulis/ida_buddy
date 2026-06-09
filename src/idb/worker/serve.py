@@ -89,12 +89,18 @@ def serve(port, token, session_id, open_path, input_path, save_policy, logfile=N
     except Exception as exc:
         print(f"worker crashed: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
     finally:
-        registry.unregister(session_id)
-        if opened:
-            save = _save_decision(save_policy)
-            try:
-                idapro.close_database(save)
-            except Exception as exc:
-                print(f"close_database error: {exc}", file=sys.stderr, flush=True)
-        server.close()
+        # Unregister only AFTER close_database: while a long save is running the
+        # entry must stay visible (probe -> busy, pid alive) so a concurrent
+        # `idb open` of the same target cannot spawn a second worker over the
+        # half-written .i64.
+        try:
+            if opened:
+                save = _save_decision(save_policy)
+                try:
+                    idapro.close_database(save)
+                except Exception as exc:
+                    print(f"close_database error: {exc}", file=sys.stderr, flush=True)
+        finally:
+            registry.unregister(session_id)
+            server.close()
     return 0 if opened else 4
