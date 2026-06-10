@@ -17,6 +17,7 @@ from idb.worker import idahelp
 from idb.worker.dispatch import handler
 
 _LIST_DEFAULT = 300
+_TYPE_MEMBER_DEFAULT = 300
 _INT_MAX = 0x7FFFFFFF
 _UINT32_MAX = 0xFFFFFFFF
 
@@ -92,11 +93,11 @@ def type_(name, addr=None, offset=0, count=None):
         if addr is not None:
             raise IdbError(protocol.BAD_ARGS,
                            f"{name!r} is not a named type; name a struct/union to overlay {addr!r}")
-        return _typeof(name)
     result = {"name": name, "kind": _kind(tif), "size": tif.get_size(), "decl": str(tif)}
     if tif.is_union() or tif.is_struct():
         base = idahelp.resolve_target(addr) if addr is not None else None
-        members, next_offset = idahelp.paginate(_udt_members(tif), offset, count)
+        effective_count = count if count is not None else _TYPE_MEMBER_DEFAULT
+        members, next_offset = idahelp.paginate(_udt_members(tif), offset, effective_count)
         if base is not None:
             for m in members:
                 m["value"] = _read_value(base + m["offset"], m["size"])
@@ -108,7 +109,8 @@ def type_(name, addr=None, offset=0, count=None):
         raise IdbError(protocol.BAD_ARGS,
                        f"value overlay requires a struct or union, not {result['kind']}")
     if tif.is_enum():
-        members, next_offset = idahelp.paginate(_enum_members(tif), offset, count)
+        effective_count = count if count is not None else _TYPE_MEMBER_DEFAULT
+        members, next_offset = idahelp.paginate(_enum_members(tif), offset, effective_count)
         result["members"] = members
         return result, idahelp.page_meta(members, next_offset)
     return result

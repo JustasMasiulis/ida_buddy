@@ -112,7 +112,7 @@ def _counted_string_type(ea):
 
 
 @handler("string")
-def string(addr, encoding=None):
+def string(addr, encoding=None, offset=0, count=None):
     ea = idahelp.resolve_mapped(addr)
     if encoding == "ascii":
         strtype = ida_nalt.STRTYPE_C
@@ -154,8 +154,13 @@ def string(addr, encoding=None):
     # IDA returns display bytes for string contents, not the raw storage bytes.
     text = raw.decode("utf-8", "replace")
     byte_length = _string_storage_size(ea, strtype, raw)
-    return {"addr": ea, "encoding": encoding,
-            "bytes": raw, "text": text, "length": byte_length}
+    text_cap = count if count else 4096
+    truncated = len(text) > text_cap
+    if truncated:
+        text = text[:text_cap]
+    meta = {"truncated": True, "next_offset": text_cap, "shown": 1} if truncated else None
+    return {"addr": ea, "encoding": encoding, "text": text, "length": byte_length,
+            "text_truncated": truncated}, meta
 
 
 @handler("pointers")

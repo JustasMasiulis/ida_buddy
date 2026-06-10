@@ -41,6 +41,7 @@ class Context:
         self.target = ""
         self.stop = None
         self.save_override = None
+        self.last_request = 0.0
 
 
 CTX = Context()

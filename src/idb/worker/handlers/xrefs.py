@@ -22,6 +22,8 @@ from idb.worker import idahelp
 from idb.worker.budget import Budget
 from idb.worker.dispatch import handler
 
+
+_FWD = ida_bytes.BIN_SEARCH_FORWARD
 _KIND = {
     ida_xref.dr_O: "offset", ida_xref.dr_W: "write", ida_xref.dr_R: "read",
     ida_xref.dr_T: "text", ida_xref.dr_I: "info",
@@ -30,8 +32,8 @@ _KIND = {
     ida_xref.fl_F: "flow",
 }
 _CALL_TYPES = (ida_xref.fl_CF, ida_xref.fl_CN)
-_FWD = ida_bytes.BIN_SEARCH_FORWARD | ida_bytes.BIN_SEARCH_NOSHOW
 _DEFAULT = 200
+_CALLEE_CAP = 200
 
 
 def _kind(xtype):
@@ -158,16 +160,23 @@ def calls(func, depth=1, offset=0, count=None):
 
     seen = set()
     callees = []
+    callees_truncated = False
     for item in idautils.FuncItems(start):
+        if callees_truncated:
+            break
         for x in idautils.XrefsFrom(item):
             if x.type in _CALL_TYPES and x.to not in seen:
+                if len(callees) >= _CALLEE_CAP:
+                    callees_truncated = True
+                    break
                 seen.add(x.to)
                 name = idahelp.func_name_at(x.to) or ida_name.get_name(x.to) or ""
                 callees.append({"ea": x.to, "name": name, "from": item})
 
     callers, next_offset = idahelp.paginate(caller_gen(), offset, count if count else _DEFAULT)
     return ({"func": ida_funcs.get_func_name(start), "ea": start, "depth": depth,
-             "callers": callers, "callees": callees},
+             "callers": callers, "callees": callees,
+             "callees_truncated": callees_truncated},
             idahelp.page_meta(callers, next_offset))
 
 

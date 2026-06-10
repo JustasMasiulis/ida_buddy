@@ -7,6 +7,9 @@ import os
 import sys
 import signal
 import threading
+import time
+
+IDLE_TTL_S = 3600
 
 from idb import registry
 from idb.errors import IdbError
@@ -78,17 +81,21 @@ def serve(port, token, session_id, open_path, input_path, save_policy, logfile=N
             raise IdbError(protocol.IDA_ERROR, f"open_database failed rc={rc}")
         opened = True
         ida_auto.auto_wait()
-        idc.batch(1)
         _warmup()
-
         registry.update(session_id, status=registry.STATUS_READY, idb_path=idc.get_idb_path())
         CTX.ready = True
+        CTX.last_request = time.time()
 
         while not stop.is_set():
             raw = server.recv(timeout_ms=500)
             if raw is None:
+                if time.time() - CTX.last_request > IDLE_TTL_S:
+                    print(f"[idb] worker idle for {IDLE_TTL_S}s; shutting down",
+                          file=sys.stderr, flush=True)
+                    break
                 continue
             server.send(dispatch(raw))
+            CTX.last_request = time.time()
     except IdbError as exc:
         print(f"worker error: {exc.code}: {exc.message}", file=sys.stderr, flush=True)
     except Exception as exc:

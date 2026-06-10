@@ -124,9 +124,10 @@ _PAGE_UNITS = {
     "read": "cells (default 64 B at width 1, else 16)",
     "pointers": "pointers (default 16)", "xrefs": "rows (default 200)",
     "calls": "callers (default 200)", "strrefs": "rows (default 200)",
-    "search": "matches (default 200)", "type": "members (resolve) / rows (search, default 300)",
-    "member": "paths (default: all)", "frame": "variables (default: all)",
-    "audit_call_types": "findings (default: all ranked)",
+    "search": "matches (default 200)", "type": "members (resolve, default 300) / rows (search, default 300)",
+    "member": "paths (default 200)", "frame": "variables (default: all)",
+    "audit_call_types": "findings (default 50)",
+    "string": "text chars (default 4096)",
     "sessions": "rows", "doctor": "rows",
 }
 _TOTAL_CMDS = frozenset({"segments", "funcs", "imports", "exports", "strings", "names", "type",
@@ -167,11 +168,11 @@ def _add_flags(sp, name):
                     help="also report the full count (extra scan)"
                          if name in _TOTAL_CMDS else argparse.SUPPRESS)
 
-
 _ROOT_DESCRIPTION = (
     "IDA Pro Buddy - drive a headless IDA session from the shell. Each call resolves a worker "
     "and does one RPC round-trip; open a database first with `idb open <file>`, then target it "
-    "with -s/--idb (defaults to the most-recent session). WinDbg-style aliases "
+    "with -s/--idb (when only one session is live, it is used; with 2+ you must disambiguate). "
+    "WinDbg-style aliases "
     "(u, dec, db/dw/dd/dq, da/du, x, ln, dt, s) are recommended."
 )
 _ROOT_EPILOG = (
@@ -441,7 +442,7 @@ def build_request(ns):
     if c == "read":
         return c, {"addr": ns.addr, "width": ns.width or 1, **_page(ns)}
     if c == "string":
-        return c, {"addr": ns.addr, "encoding": ns.encoding}
+        return c, {"addr": ns.addr, "encoding": ns.encoding, **_page(ns)}
     if c == "pointers":
         return c, {"addr": ns.addr, **_page(ns)}
     if c == "string_struct":
