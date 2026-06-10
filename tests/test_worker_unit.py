@@ -115,3 +115,30 @@ def test_finalize_size_cap(monkeypatch):
     reply = protocol.decode(dispatch._finalize(1, {"data": list(range(2000))}, None))
     assert reply["ok"] and reply["meta"]["truncated"]
     assert len(reply["result"]["data"]) < 2000
+
+
+def test_finalize_trims_paged_lines_without_fabricating_resume(monkeypatch):
+    monkeypatch.setattr(dispatch, "MAX_REPLY_BYTES", 512)
+    result = {"lines": ["x" * 80 for _ in range(20)]}
+    meta = {"shown": 20, "truncated": True, "next_offset": 25}
+
+    reply = protocol.decode(dispatch._finalize(1, result, meta))
+
+    assert reply["ok"]
+    assert reply["meta"]["truncated"]
+    assert reply["meta"]["truncated_field"] == "lines"
+    assert reply["meta"]["next_offset"] == 5 + len(reply["result"]["lines"])
+    assert len(reply["result"]["lines"]) < 20
+
+
+def test_finalize_trims_nonpaged_list_without_resume_hint(monkeypatch):
+    monkeypatch.setattr(dispatch, "MAX_REPLY_BYTES", 512)
+    result = {"callees": [{"name": "x" * 80} for _ in range(20)]}
+
+    reply = protocol.decode(dispatch._finalize(1, result, None))
+
+    assert reply["ok"]
+    assert reply["meta"]["truncated"]
+    assert reply["meta"]["truncated_field"] == "callees"
+    assert "next_offset" not in reply["meta"]
+    assert len(reply["result"]["callees"]) < 20

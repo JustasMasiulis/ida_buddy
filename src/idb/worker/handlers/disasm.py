@@ -14,6 +14,7 @@ from idb.worker.dispatch import handler
 
 _FUNC_CAP = 2048
 _RAW_DEFAULT = 32
+_DECOMP_DEFAULT = 120
 
 
 def _seg_name(ea):
@@ -71,6 +72,6 @@ def decompile(func, offset=0, count=None):
     f = idahelp.require_func(func)
     cfunc = idahelp.safe_decompile(f.start_ea)
     lines = (ida_lines.tag_remove(sl.line) for sl in cfunc.get_pseudocode())
-    items, next_offset = idahelp.paginate(lines, offset, count)
+    items, next_offset = idahelp.paginate(lines, offset, count if count else _DECOMP_DEFAULT)
     return ({"func": ida_funcs.get_func_name(f.start_ea), "ea": f.start_ea, "lines": items},
             idahelp.page_meta(items, next_offset))

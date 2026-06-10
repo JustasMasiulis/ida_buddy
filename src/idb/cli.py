@@ -120,7 +120,7 @@ _PAGE_UNITS = {
     "exports": "rows (default 200)", "strings": "rows (default 200)",
     "names": "rows (default 200)",
     "disas": "instructions (default 32; whole-func cap 2048)",
-    "decompile": "lines (default: all)",
+    "decompile": "lines (default 120)",
     "read": "cells (default 64 B at width 1, else 16)",
     "pointers": "pointers (default 16)", "xrefs": "rows (default 200)",
     "calls": "callers (default 200)", "strrefs": "rows (default 200)",

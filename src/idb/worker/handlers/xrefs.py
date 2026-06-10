@@ -165,7 +165,7 @@ def calls(func, depth=1, offset=0, count=None):
                 name = idahelp.func_name_at(x.to) or ida_name.get_name(x.to) or ""
                 callees.append({"ea": x.to, "name": name, "from": item})
 
-    callers, next_offset = idahelp.paginate(caller_gen(), offset, count)
+    callers, next_offset = idahelp.paginate(caller_gen(), offset, count if count else _DEFAULT)
     return ({"func": ida_funcs.get_func_name(start), "ea": start, "depth": depth,
              "callers": callers, "callees": callees},
             idahelp.page_meta(callers, next_offset))
