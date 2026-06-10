@@ -5,6 +5,7 @@ call ida_* directly. ida_* imports happen here and below, AFTER idapro activatio
 
 import os
 import sys
+import signal
 import threading
 
 from idb import registry
@@ -42,6 +43,10 @@ def serve(port, token, session_id, open_path, input_path, save_policy, logfile=N
     import idc
 
     stop = threading.Event()
+    try:
+        signal.signal(signal.SIGTERM, lambda signum, frame: stop.set())
+    except AttributeError:
+        pass  # SIGTERM not defined on this platform (Windows)
     try:
         server = ZmqServer(port)
     except Exception as exc:

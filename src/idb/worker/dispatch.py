@@ -42,8 +42,8 @@ class Context:
 CTX = Context()
 
 
-def _err(rid, code, message, data=None):
-    return protocol.encode(protocol.build_error(rid, code, message, data))
+def _err(rid, code, message):
+    return protocol.encode(protocol.build_error(rid, code, message))
 
 
 def _create_undo_point(cmd):

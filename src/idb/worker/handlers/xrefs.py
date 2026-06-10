@@ -5,6 +5,7 @@ kind label, the enclosing function, and the tag-removed disassembly of the
 instruction at that address.
 """
 
+import itertools
 import ida_bytes
 import ida_ida
 import ida_lines
@@ -192,10 +193,14 @@ def _search_gen(kind, pattern, start, end, budget):
     if kind == "ref":
         target = idahelp.resolve_target(pattern)
         seen = set()
-        for ea in list(idautils.DataRefsTo(target)) + list(idautils.CodeRefsTo(target, 0)):
-            if ea not in seen:
-                seen.add(ea)
-                yield ea
+        try:
+            for ea in itertools.chain(idautils.DataRefsTo(target), idautils.CodeRefsTo(target, 0)):
+                if ea not in seen:
+                    seen.add(ea)
+                    yield ea
+        except Exception as exc:
+            raise IdbError(protocol.IDA_ERROR,
+                           f"failed to enumerate xrefs to {target:#x}: {exc}")
         return
     if kind == "imm":
         value = idahelp.parse_addr(pattern)

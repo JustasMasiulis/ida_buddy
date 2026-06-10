@@ -110,6 +110,7 @@ def _fetch_summary(entry, timeout_s):
 
 
 def _wait_ready(session_id, deadline):
+    _last_report = 0.0
     while time.time() < deadline:
         entry = registry.read(session_id)
         if entry is None:
@@ -120,6 +121,12 @@ def _wait_ready(session_id, deadline):
         if status is None:
             raise IdbError(protocol.IDA_ERROR,
                            f"worker died while starting\n{_logtail(entry.get('logfile'))}")
+        now = time.time()
+        if now - _last_report >= 10.0:
+            remaining = int(deadline - now)
+            print(f"[idb] waiting for {session_id} (status={status}, ~{remaining}s timeout)"
+                  f" ...", file=sys.stderr)
+            _last_report = now
         time.sleep(0.2)
     raise IdbError(protocol.TIMEOUT, f"timed out waiting for {session_id} to become ready")
 

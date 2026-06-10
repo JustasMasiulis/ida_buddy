@@ -172,7 +172,8 @@ def pointers(addr, count=None, offset=0):
         sym, off = _symbolize(value) if ida_bytes.is_mapped(value) else (None, 0)
         rows.append({"ea": cur, "value": value, "sym": sym, "off": off})
         cur += width
-    return {"addr": ea, "width": width, "data": rows, "count": len(rows)}
+    return {"addr": ea, "width": width, "data": rows, "count": len(rows),
+            "be": ida_ida.inf_is_be()}
 
 
 @handler("string_struct")
