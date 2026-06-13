@@ -5,7 +5,11 @@ call ida_* directly. ida_* imports happen here and below, AFTER idapro activatio
 
 import os
 import sys
+import signal
 import threading
+import time
+
+IDLE_TTL_S = 3600
 
 from idb import registry
 from idb.errors import IdbError
@@ -43,6 +47,10 @@ def serve(port, token, session_id, open_path, input_path, save_policy, logfile=N
 
     stop = threading.Event()
     try:
+        signal.signal(signal.SIGTERM, lambda signum, frame: stop.set())
+    except AttributeError:
+        pass  # SIGTERM not defined on this platform (Windows)
+    try:
         server = ZmqServer(port)
     except Exception as exc:
         print(f"bind failed on port {port}: {exc}", file=sys.stderr, flush=True)
@@ -73,28 +81,38 @@ def serve(port, token, session_id, open_path, input_path, save_policy, logfile=N
             raise IdbError(protocol.IDA_ERROR, f"open_database failed rc={rc}")
         opened = True
         ida_auto.auto_wait()
-        idc.batch(1)
         _warmup()
-
         registry.update(session_id, status=registry.STATUS_READY, idb_path=idc.get_idb_path())
         CTX.ready = True
+        CTX.last_request = time.time()
 
         while not stop.is_set():
             raw = server.recv(timeout_ms=500)
             if raw is None:
+                if time.time() - CTX.last_request > IDLE_TTL_S:
+                    print(f"[idb] worker idle for {IDLE_TTL_S}s; shutting down",
+                          file=sys.stderr, flush=True)
+                    break
                 continue
             server.send(dispatch(raw))
+            CTX.last_request = time.time()
     except IdbError as exc:
         print(f"worker error: {exc.code}: {exc.message}", file=sys.stderr, flush=True)
     except Exception as exc:
         print(f"worker crashed: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
     finally:
-        registry.unregister(session_id)
-        if opened:
-            save = _save_decision(save_policy)
-            try:
-                idapro.close_database(save)
-            except Exception as exc:
-                print(f"close_database error: {exc}", file=sys.stderr, flush=True)
-        server.close()
+        # Unregister only AFTER close_database: while a long save is running the
+        # entry must stay visible (probe -> busy, pid alive) so a concurrent
+        # `idb open` of the same target cannot spawn a second worker over the
+        # half-written .i64.
+        try:
+            if opened:
+                save = _save_decision(save_policy)
+                try:
+                    idapro.close_database(save)
+                except Exception as exc:
+                    print(f"close_database error: {exc}", file=sys.stderr, flush=True)
+        finally:
+            registry.unregister(session_id)
+            server.close()
     return 0 if opened else 4

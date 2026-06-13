@@ -39,7 +39,10 @@ def format_calls(result, ns=None):
         where = f"  ; in {c['func']}" if c.get("func") else ""
         out.append(f"    {indent}{c['ea']:x}  {squash_insn(c['insn'])}{where}")
     callees = result.get("callees", [])
-    out.append(f"  callees ({len(callees)}):")
+    callee_label = f"callees ({len(callees)})"
+    if result.get("callees_truncated"):
+        callee_label += "+"
+    out.append(f"  {callee_label}:")
     for c in callees:
         out.append(f"    {c['ea']:x}  {c.get('name') or '?'}")
     return "\n".join(out)

@@ -49,6 +49,17 @@ def state_dir() -> Path:
             pass
     return root
 
+def _log_dir() -> Path:
+    return state_dir().parent / "logs"
+
+
+def _remove_stale_log(session_id):
+    log_path = _log_dir() / f"{session_id}.log"
+    try:
+        log_path.unlink(missing_ok=True)
+    except Exception:
+        pass
+
 
 def _entry_path(session_id) -> Path:
     return state_dir() / f"{session_id}.json"
@@ -253,13 +264,16 @@ def probe(entry, timeout_ms=800):
 
 def cleanup_stale() -> list:
     """Unlink only hard-stale entries (worker pid definitively gone). Conservative
-    by design: an alive-but-unreachable worker (mid native call) is left alone."""
+    by design: an alive-but-unreachable worker (mid native call) is left alone.
+    Also removes stale log files."""
     removed = []
     for entry in list_all():
         pid = entry.get("pid")
         if pid and not pid_alive(pid):
-            unregister(entry["id"])
-            removed.append(entry["id"])
+            sid = entry["id"]
+            unregister(sid)
+            _remove_stale_log(sid)
+            removed.append(sid)
     return removed
 
 

@@ -17,6 +17,10 @@ HANDLERS = {}
 
 MAX_REPLY_BYTES = 8 * 1024 * 1024
 
+_TRIMMABLE_LIST_KEYS = (
+    "data", "lines", "callers", "callees", "findings", "strings", "members", "paths",
+)
+
 
 def handler(name, *, writes=False, always=False, budget=None):
     def deco(fn):
@@ -37,13 +41,14 @@ class Context:
         self.target = ""
         self.stop = None
         self.save_override = None
+        self.last_request = 0.0
 
 
 CTX = Context()
 
 
-def _err(rid, code, message, data=None):
-    return protocol.encode(protocol.build_error(rid, code, message, data))
+def _err(rid, code, message):
+    return protocol.encode(protocol.build_error(rid, code, message))
 
 
 def _create_undo_point(cmd):
@@ -98,16 +103,44 @@ def dispatch(raw):
     return _finalize(rid, result, meta)
 
 
+def _trimmable_lists(result):
+    if not isinstance(result, dict):
+        return []
+    out = []
+    for key in _TRIMMABLE_LIST_KEYS:
+        value = result.get(key)
+        if isinstance(value, list) and value:
+            out.append((key, value))
+    out.sort(key=lambda item: len(item[1]), reverse=True)
+    return out
+
+
+def _trim_meta(meta, key, before, after):
+    meta = dict(meta or {})
+    has_page_base = meta.get("next_offset") is not None and meta.get("shown") is not None
+    if has_page_base:
+        base = max(0, int(meta["next_offset"]) - int(meta["shown"]))
+    meta.update(truncated=True, shown=after)
+    if has_page_base:
+        meta["next_offset"] = base + after
+    elif key == "data":
+        # Preserve the historical generic-list fallback: safe for offset-zero
+        # replies and still better than returning an oversized INTERNAL error.
+        meta["next_offset"] = after
+    if before != after and key != "data":
+        meta["truncated_field"] = key
+    return meta
+
+
 def _finalize(rid, result, meta):
     blob = protocol.encode(protocol.build_ok(rid, result, meta))
-    if len(blob) <= MAX_REPLY_BYTES:
-        return blob
-    if isinstance(result, dict) and isinstance(result.get("data"), list) and result["data"]:
-        data = result["data"]
-        meta = dict(meta or {})
-        while data and len(blob) > MAX_REPLY_BYTES:
-            del data[-max(1, len(data) // 8):]
-            meta.update(truncated=True, shown=len(data), next_offset=len(data))
-            blob = protocol.encode(protocol.build_ok(rid, result, meta))
-        return blob
-    return _err(rid, protocol.INTERNAL, "reply exceeds size cap and cannot be trimmed")
+    while len(blob) > MAX_REPLY_BYTES:
+        lists = _trimmable_lists(result)
+        if not lists:
+            return _err(rid, protocol.INTERNAL, "reply exceeds size cap and cannot be trimmed")
+        key, values = lists[0]
+        before = len(values)
+        del values[-max(1, before // 8):]
+        meta = _trim_meta(meta, key, before, len(values))
+        blob = protocol.encode(protocol.build_ok(rid, result, meta))
+    return blob

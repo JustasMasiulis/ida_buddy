@@ -42,7 +42,7 @@ Aliases in parens. `[mut]` mutates the database (creates an undo point).
 | `eval <expr>` (`?`) | arithmetic/bitwise calc + name lookup; `+%`/`-%`/`*%` wrap (`-w` width); result as hex / `0n`-dec (signed+unsigned) / ascii |
 | `imports [pat]` / `exports [pat]` / `strings [pat]` | imports / entry points / strings |
 | `disas <target>` (`u`, `uf`) | whole function, or `-n N` insns starting at an address target; `-o` is pagination offset, not an address |
-| `decompile <func>` (`dec`) | Hex-Rays pseudocode; if output is noisy, improve types or use `triage` to narrow scope first |
+| `decompile <func>` (`dec`) | Hex-Rays pseudocode; defaults to 120 lines, resume with `-o` or use `-n`; if output is noisy, improve types or use `triage` to narrow scope first |
 | `read <addr>` (`db`/`dw`/`dd`/`dq`) | dump cells (`-w 1\|2\|4\|8`, `-n N`) |
 | `pointers <addr>` (`dps`/`dqs`) | dump pointers and nearest symbols |
 | `string <addr>` (`da`/`du`) / `string_struct <addr>` (`ds`/`dS`) | raw strings and counted ANSI/UNICODE_STRING-style structs |

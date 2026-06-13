@@ -120,13 +120,14 @@ _PAGE_UNITS = {
     "exports": "rows (default 200)", "strings": "rows (default 200)",
     "names": "rows (default 200)",
     "disas": "instructions (default 32; whole-func cap 2048)",
-    "decompile": "lines (default: all)",
+    "decompile": "lines (default 120)",
     "read": "cells (default 64 B at width 1, else 16)",
     "pointers": "pointers (default 16)", "xrefs": "rows (default 200)",
     "calls": "callers (default 200)", "strrefs": "rows (default 200)",
-    "search": "matches (default 200)", "type": "members (resolve) / rows (search, default 300)",
-    "member": "paths (default: all)", "frame": "variables (default: all)",
-    "audit_call_types": "findings (default: all ranked)",
+    "search": "matches (default 200)", "type": "members (resolve, default 300) / rows (search, default 300)",
+    "member": "paths (default 200)", "frame": "variables (default: all)",
+    "audit_call_types": "findings (default 50)",
+    "string": "text chars (default 4096)",
     "sessions": "rows", "doctor": "rows",
 }
 _TOTAL_CMDS = frozenset({"segments", "funcs", "imports", "exports", "strings", "names", "type",
@@ -167,11 +168,11 @@ def _add_flags(sp, name):
                     help="also report the full count (extra scan)"
                          if name in _TOTAL_CMDS else argparse.SUPPRESS)
 
-
 _ROOT_DESCRIPTION = (
     "IDA Pro Buddy - drive a headless IDA session from the shell. Each call resolves a worker "
     "and does one RPC round-trip; open a database first with `idb open <file>`, then target it "
-    "with -s/--idb (defaults to the most-recent session). WinDbg-style aliases "
+    "with -s/--idb (when only one session is live, it is used; with 2+ you must disambiguate). "
+    "WinDbg-style aliases "
     "(u, dec, db/dw/dd/dq, da/du, x, ln, dt, s) are recommended."
 )
 _ROOT_EPILOG = (
@@ -287,7 +288,7 @@ def build_parser():
     sp = cmd("strrefs", help="xrefs to strings matching a pattern", ex=("strrefs license",))
     sp.add_argument("pattern")
     sp = cmd("search", help="search bytes/imm/str/ref (alias: s)",
-             ex=("search 90 90 -k bytes", 's GetProcAddress -k str'))
+             ex=('search "90 90" -k bytes', 's GetProcAddress -k str'))
     sp.add_argument("pattern")
     sp.add_argument("-k", "--kind", choices=("bytes", "imm", "str", "ref"), default="bytes")
 
@@ -363,7 +364,8 @@ def build_parser():
     sp.add_argument("name")
     sp.add_argument("members", help="k=v,k=v,...")
     sp.add_argument("--bitfield", action="store_true")
-    sp = cmd("patch", help="patch bytes [mut]", ex=("patch 0x401037 90 90",))
+    sp = cmd("patch", help="patch bytes [mut]",
+             ex=("patch 0x401037 9090", 'patch 0x401037 "90 90"'))
     sp.add_argument("addr")
     sp.add_argument("hex")
     cmd("undo", help="revert last mutation [mut]", ex=("undo",))
@@ -440,7 +442,7 @@ def build_request(ns):
     if c == "read":
         return c, {"addr": ns.addr, "width": ns.width or 1, **_page(ns)}
     if c == "string":
-        return c, {"addr": ns.addr, "encoding": ns.encoding}
+        return c, {"addr": ns.addr, "encoding": ns.encoding, **_page(ns)}
     if c == "pointers":
         return c, {"addr": ns.addr, **_page(ns)}
     if c == "string_struct":
@@ -567,6 +569,17 @@ def run_remote(ns, rpc_cmd, rpc_args):
     timeout = ns.timeout if ns.timeout else DEFAULT_TIMEOUT
     try:
         reply = client.call(rpc_cmd, rpc_args, timeout_ms=int(timeout * 1000))
+    except IdbError as exc:
+        # The REP loop is serial: a timeout usually means another (or a long)
+        # request is in flight, not a dead worker. Say so before someone
+        # reaches for `close --kill` on a healthy session.
+        if exc.code == protocol.TIMEOUT and registry.pid_alive(entry.get("pid")):
+            raise IdbError(
+                protocol.TIMEOUT,
+                f"{exc.message}; worker {entry['id']} is alive but busy "
+                "(likely serving a long request) — retry or raise -t",
+            ) from exc
+        raise
     finally:
         client.close()
     return emit(rpc_cmd, reply, ns)
@@ -621,6 +634,11 @@ def _close_one(entry, kill, save, timeout_s=20.0):
     deadline = time.time() + timeout_s
     while time.time() < deadline and registry.pid_alive(pid):
         time.sleep(0.1)
+    if registry.pid_alive(pid):
+        # Still saving (large .i64). The entry must outlive the save so a
+        # concurrent `idb open` cannot spawn a second worker over it; the
+        # worker unregisters itself once close_database finishes.
+        return f"{sid} shutting down; still saving (pid {pid}); it will clear its session entry when done"
     registry.unregister(sid)
     return f"closed {sid} (save={save})"
 

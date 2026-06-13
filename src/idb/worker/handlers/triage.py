@@ -75,6 +75,8 @@ def _direct_callees(start):
             if target not in seen:
                 seen.add(target)
                 out.append(target)
+                if len(out) >= _CALLEE_CAP:
+                    return out
     return out
 
 
@@ -386,7 +388,7 @@ def triage(func):
         "proto_source": proto_source,
         "callee_count": len(callee_eas),
         "callees": ranked,
-        "callees_truncated": len(callee_eas) > len(ranked),
+        "callees_truncated": len(callee_eas) >= _CALLEE_CAP,
         "groups_down": groups_down,
         "groups_up": groups_up,
         "groups_truncated": groups_truncated,

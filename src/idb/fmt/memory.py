@@ -53,7 +53,10 @@ def format_string(result, ns=None):
         gutter = _utf16_gutter if result["encoding"] == "utf16" else _ascii_gutter
         return _hexdump(result["addr"], result["bytes"], gutter)
     text = escape_text(result["text"], tabs=False)
-    return f'{result["addr"]:x}  {result["encoding"]} {result["length"]} bytes  "{text}"'
+    line = f'{result["addr"]:x}  {result["encoding"]} {result["length"]} bytes  "{text}"'
+    if result.get("text_truncated"):
+        line += "  [+more; use da/du with -o N to resume, or db to hexdump]"
+    return line
 
 
 def format_pointers(result, ns=None):

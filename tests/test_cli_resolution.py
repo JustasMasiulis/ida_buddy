@@ -373,6 +373,72 @@ def test_close_kill_unregisters_after_success(monkeypatch):
     assert unregistered == ["dead"]
 
 
+class _FakeClient:
+    """Stands in for cli.ZmqClient: replies ok to shutdown, or raises on call."""
+
+    def __init__(self, port, token, raises=None):
+        self.raises = raises
+
+    def call(self, cmd, args=None, timeout_ms=0):
+        if self.raises:
+            raise self.raises
+        return protocol.build_ok(1, {"stopping": True})
+
+    def close(self):
+        pass
+
+
+def test_close_leaves_entry_while_worker_still_saving(monkeypatch):
+    entry = {"id": "slow", "port": 1, "token": "t", "pid": 1234}
+    unregistered = []
+    monkeypatch.setattr(cli, "ZmqClient", _FakeClient)
+    monkeypatch.setattr(registry, "pid_alive", lambda pid: True)
+    monkeypatch.setattr(registry, "unregister", unregistered.append)
+
+    msg = cli._close_one(entry, kill=False, save=True, timeout_s=0.05)
+
+    assert "still saving" in msg
+    assert unregistered == []
+
+
+def test_close_unregisters_after_worker_exits(monkeypatch):
+    entry = {"id": "quick", "port": 1, "token": "t", "pid": 1234}
+    unregistered = []
+    monkeypatch.setattr(cli, "ZmqClient", _FakeClient)
+    monkeypatch.setattr(registry, "pid_alive", lambda pid: False)
+    monkeypatch.setattr(registry, "unregister", unregistered.append)
+
+    assert cli._close_one(entry, kill=False, save=True, timeout_s=0.05) == "closed quick (save=True)"
+    assert unregistered == ["quick"]
+
+
+def test_run_remote_timeout_adds_busy_hint_when_pid_alive(monkeypatch):
+    entry = {"id": "busy1", "port": 1, "token": "t", "pid": 1234}
+    timeout_err = IdbError(protocol.TIMEOUT, "no reply from worker within 100 ms")
+    monkeypatch.setattr(cli, "resolve_session", lambda ns: entry)
+    monkeypatch.setattr(cli, "ZmqClient", lambda port, token: _FakeClient(port, token, raises=timeout_err))
+    monkeypatch.setattr(registry, "pid_alive", lambda pid: True)
+
+    with pytest.raises(IdbError) as ei:
+        cli.run_remote(_ns(timeout=None), "funcs", {})
+
+    assert ei.value.code == protocol.TIMEOUT
+    assert "alive but busy" in ei.value.message
+
+
+def test_run_remote_timeout_unchanged_when_pid_dead(monkeypatch):
+    entry = {"id": "gone", "port": 1, "token": "t", "pid": 1234}
+    timeout_err = IdbError(protocol.TIMEOUT, "no reply from worker within 100 ms")
+    monkeypatch.setattr(cli, "resolve_session", lambda ns: entry)
+    monkeypatch.setattr(cli, "ZmqClient", lambda port, token: _FakeClient(port, token, raises=timeout_err))
+    monkeypatch.setattr(registry, "pid_alive", lambda pid: False)
+
+    with pytest.raises(IdbError) as ei:
+        cli.run_remote(_ns(timeout=None), "funcs", {})
+
+    assert ei.value.message == "no reply from worker within 100 ms"
+
+
 def test_help_alias_prints_root_help(capsys):
     assert cli.main(["help"]) == 0
     assert "usage: idb" in capsys.readouterr().out

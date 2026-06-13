@@ -32,6 +32,7 @@ from idb.worker.handlers import triage as tri
 BUDGET_S = 20.0
 DECOMP_LIMIT = 400
 FINDINGS_CAP = 2000
+FINDINGS_DEFAULT_PAGE = 50
 
 
 def _kind(ea):
@@ -208,6 +209,7 @@ def audit_call_types(scope=None, budget=None, limit=None, min_sites=None, min_ca
         findings.extend(_param_findings(param_buckets, no_imports, decls_for, thr))
 
     ranked = pure.rank_findings(findings, cap=FINDINGS_CAP)
+    count = count if count is not None else FINDINGS_DEFAULT_PAGE
     page, next_off = idahelp.paginate(ranked, offset, count)
     result = {
         "scope": scope,
