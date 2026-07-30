@@ -1,9 +1,9 @@
 # idb — IDA Pro Buddy
 
-A windbg-flavored CLI for interacting with IDA that is optimized for agentic harnesses. `idb` maintains a persistent headless worker per database and tries to minimize token use with compact text output.
+A windbg-flavored CLI for interacting with IDA that is optimized for agentic harnesses. Every command opens an official [IDA Code Mode](https://pypi.org/project/ida-codemode/) `DatabaseHandle`, performs one operation, and releases it. Registered GUI databases are preferred; Code Mode starts a managed idalib worker when an explicit `--idb` target needs one. Output remains compact to minimize token use.
 
 ```
-idb open foo.exe          # spawn + analyze, print a triage summary
+idb open foo.exe          # attach GUI or managed idalib, print a triage summary
 idb u sub_401000          # disassemble a function (windbg alias for `disas`)
 idb dec sub_401000        # decompile (Hex-Rays)
 idb db 0x401000 -n 64     # hexdump 64 bytes
@@ -12,21 +12,22 @@ idb xref_to validate_key  # who references this, with instruction context
 idb triage sub_401000     # size up a function before reading it
 idb ? sub_401000 + 0x10   # evaluate an expression (alias for `eval`)
 idb dt GUID                # inspect a type
-idb close                 # save + shut the worker down
 ```
 
 ## Install
 
-This tool requires IDA Pro to be installed and activated globally.
+This port requires IDA 9.4+, IDA Code Mode, and its optional GUI plugin. Code Mode owns idalib activation and database lifecycle.
 
 ```powershell
-# 1. Activate idalib so idapro can locate your IDA install (writes ida-config.json):
-python "C:\Program Files\IDA Professional 9.3\idalib\python\py-activate-idalib.py"
-# 2. Install idb (pulls idapro + pyzmq + msgspec from PyPI):
-python -m pip install -e D:\ida_buddy
-# 3. Verify the environment:
-idb doctor
+# Installs ida-codemode from PyPI with ida-buddy:
+uv sync
+uv run idb doctor
+
+# Install the GUI plugin so already-open IDA databases are registered:
+hcli plugin install https://github.com/HexRaysSA/ida-codemode
 ```
+
+For a packaged install, install `ida-codemode>=0.3.1` and `ida-buddy` in the same environment so the `ida-codemode-worker` console script is discoverable.
 
 ## Commands
 
@@ -34,9 +35,9 @@ Aliases in parens. `[mut]` mutates the database (creates an undo point).
 
 | Command | Meaning |
 |---|---|
-| `open [--fresh] <path>` | spawn + analyze, print summary |
-| `sessions` | list running workers |
-| `close [session] [--no-save\|--kill\|--all]` / `save` / `doctor` | lifecycle |
+| `open [--fresh] <path>` | attach to a registered GUI, or spawn managed idalib, then print summary |
+| `sessions` | list registered Code Mode databases |
+| `save` / `doctor` | persist the selected database / diagnose setup |
 | `segments` | segments + rwx |
 | `funcs [pat]` / `names <pat>` (`x`) / `nearest <addr>` (`ln`) | symbols |
 | `eval <expr>` (`?`) | arithmetic/bitwise calc + name lookup; `+%`/`-%`/`*%` wrap (`-w` width); result as hex / `0n`-dec (signed+unsigned) / ascii |
@@ -70,34 +71,37 @@ Aliases in parens. `[mut]` mutates the database (creates an undo point).
 | `undo` / `redo` *(mut)* | revert / replay the last mutation |
 
 
-## Sessions
+## Database targeting
 
-`idb open` starts or reuses one persistent worker per input path. Commands target
-the only running worker by default. Once two or more workers are live, pass a
-session id or database/binary path on every command:
+There is no idb daemon or retained cross-process CLI session. Each invocation
+uses one `DatabaseHandle` and closes it before exiting.
+
+With exactly one registered GUI/idalib database, commands select it
+automatically. Otherwise target a live record from `idb sessions` with `-s`, or
+pass a stable executable/IDB path with `--idb`:
 
 ```
 idb sessions
-idb -s foo.exe-1a2b3c4d funcs main
+idb -s 12345-a1b2c3 funcs main
 idb --idb C:\bins\foo.exe dec main
-idb close foo.exe-1a2b3c4d
-idb close --all --no-save
+idb --idb C:\bins\foo.exe save
 ```
 
-If a command fails with `AMBIGUOUS`, rerun it with `-s <session>` from
-`idb sessions` or `--idb <path>`. `open --fresh <path>` refuses to clobber a live
-worker for that database; close the session first when you want a clean reanalysis.
+`--idb` can start a managed idalib worker on demand. After the command releases
+its handle, Code Mode keeps the worker through its zero-lease grace period,
+then saves and closes it. GUI databases are never closed by the CLI.
+`open --fresh` creates a new IDB and refuses to run while a live instance owns
+the target.
 
 ## Examples
 
 ```powershell
-# Lifecycle and session targeting
+# Discovery and targeting
 idb doctor
+idb sessions
 idb open C:\bins\foo.exe
 idb open foo.exe --fresh
-idb sessions
-idb -s foo.exe-1a2b3c4d save
-idb close foo.exe-1a2b3c4d
+idb --idb C:\bins\foo.exe save
 
 # Database overview and symbols
 idb segments --total
@@ -190,11 +194,11 @@ and focused `disas` windows to inspect only the code that still matters.
 ### Exit codes
 
 `0` ok · `1` error (IDA/not-found/bad-address/internal) · `2` usage · `3` no
-session · `4` ambiguous session · `5` not ready · `6` timeout · `7` unauthorized.
+registered database · `4` ambiguous database · `5` not ready · `6` timeout.
 
 ## Testing
 
 ```
-python -m pytest tests --ignore=tests/integration
-python -m pytest tests/integration # runs against a real binary
+uv run pytest tests --ignore=tests/integration
+uv run pytest tests/integration # runs against a real Code Mode instance
 ```

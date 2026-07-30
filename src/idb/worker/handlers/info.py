@@ -9,7 +9,7 @@ import ida_loader
 import idautils
 import idc
 
-from idb import protocol, registry
+from idb import protocol
 from idb.errors import IdbError
 from idb.worker import idahelp
 from idb.worker.dispatch import handler, CTX
@@ -85,17 +85,14 @@ def warmup():
 @handler("ping", always=True)
 def ping():
     return {
-        "status": registry.STATUS_READY if CTX.ready else registry.STATUS_ANALYZING,
+        "status": "ready" if CTX.ready else "analyzing",
         "session": CTX.session_id,
     }
 
 
 @handler("shutdown", always=True)
 def shutdown(save=None):
-    CTX.save_override = save
-    if CTX.stop is not None:
-        CTX.stop.set()
-    return {"stopping": True, "save": save}
+    return {"stopping": False, "save": save, "note": "Code Mode owns lifecycle"}
 
 
 @handler("open_summary")

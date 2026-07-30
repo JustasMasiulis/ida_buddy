@@ -1,3 +1,5 @@
-"""Worker subpackage. Importing this package must NOT pull in any ida_* module;
-those are imported only after idapro is activated, from within the modules that
-need them (handlers, parts of idahelp/serve)."""
+"""Remote handlers executed inside a Code Mode database instance.
+
+Importing this package never pulls in IDA. Handler modules are loaded only by
+the remote entry point after execution has entered the IDA process.
+"""

@@ -46,8 +46,10 @@ def _env_for(workspace):
 
 
 def _run(env, *args, timeout=120, check=True):
+    target = env.get("IDB_TEST_TARGET")
+    prefix = ["--idb", target] if target and args[0] not in {"open", "sessions", "doctor"} else []
     res = subprocess.run(
-        [sys.executable, "-m", "idb", *map(str, args)],
+        [sys.executable, "-m", "idb", *prefix, *map(str, args)],
         cwd=ROOT, env=env, text=True, capture_output=True, timeout=timeout,
     )
     if check and res.returncode != 0:
@@ -72,12 +74,12 @@ def session():
     target = inputs / BINARY.name
     shutil.copy2(BINARY, target)
     env = _env_for(workspace)
+    env["IDB_TEST_TARGET"] = str(target)
     _run(env, "open", target, "-t", "600", timeout=660)
     try:
         yield {"env": env, "target": target}
     finally:
-        _run(env, "close", "--no-save", timeout=90, check=False)
-        time.sleep(0.5)
+        time.sleep(35)  # zero-lease grace plus IDB save/close
         shutil.rmtree(workspace, ignore_errors=True)
 
 

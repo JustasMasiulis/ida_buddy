@@ -1,21 +1,22 @@
 import argparse
+from types import SimpleNamespace
 
 import pytest
 
-from idb import cli, protocol, registry
-from idb.errors import IdbError, NO_SESSION, AMBIGUOUS
+from idb import cli, protocol
+from idb.errors import IdbError
 
 
 def _ns(**kw):
-    base = {"session": None, "idb": None}
+    base = {
+        "session": None,
+        "idb": None,
+        "timeout": None,
+        "offset": 0,
+        "count": None,
+    }
     base.update(kw)
     return argparse.Namespace(**base)
-
-
-def _entry(sid, **over):
-    e = {"id": sid, "port": 1, "token": "t", "status": "ready", "input_path": f"C:\\b\\{sid}.exe"}
-    e.update(over)
-    return e
 
 
 def _request(argv):
@@ -23,62 +24,82 @@ def _request(argv):
     return cli.build_request(cli.normalize_namespace(ns))
 
 
-@pytest.fixture(autouse=True)
-def _no_cleanup(monkeypatch):
-    monkeypatch.setattr(registry, "cleanup_stale", lambda: None)
+def test_resolve_session_delegates_to_codemode(monkeypatch):
+    monkeypatch.setattr(
+        cli.codemode,
+        "resolve_target",
+        lambda *, session, idb: f"{session or idb or 'auto'}",
+    )
+    assert cli.resolve_session(_ns(session="record")) == "record"
+    assert cli.resolve_session(_ns(idb="sample.exe")) == "sample.exe"
+    assert cli.resolve_session(_ns()) == "auto"
 
 
-def test_resolve_zero_raises_no_session(monkeypatch):
-    monkeypatch.setattr(registry, "list_all", lambda: [])
-    with pytest.raises(IdbError) as ei:
-        cli.resolve_session(_ns())
-    assert ei.value.code == NO_SESSION
-
-
-def test_resolve_single_healthy(monkeypatch):
-    monkeypatch.setattr(registry, "list_all", lambda: [_entry("a")])
-    monkeypatch.setattr(registry, "probe", lambda e: "ready")
-    assert cli.resolve_session(_ns())["id"] == "a"
-
-
-def test_resolve_many_raises_ambiguous(monkeypatch, capsys):
-    monkeypatch.setattr(registry, "list_all", lambda: [_entry("a"), _entry("b")])
-    monkeypatch.setattr(registry, "probe", lambda e: "ready")
-    with pytest.raises(IdbError) as ei:
-        cli.resolve_session(_ns())
-    assert ei.value.code == AMBIGUOUS
-    assert "SESSION" in capsys.readouterr().err  # table dumped to stderr
-
-
-def test_resolve_by_session_id(monkeypatch):
-    monkeypatch.setattr(registry, "list_all", lambda: [_entry("a"), _entry("b")])
-    assert cli.resolve_session(_ns(session="b"))["id"] == "b"
-    with pytest.raises(IdbError) as ei:
-        cli.resolve_session(_ns(session="zzz"))
-    assert ei.value.code == NO_SESSION
-
-
-def test_resolve_by_idb_path(monkeypatch):
-    entries = [
-        _entry("a", input_path=r"C:\b\foo.exe", idb_path=r"C:\b\foo.exe.i64"),
-        _entry("b", input_path=r"C:\b\bar.exe", idb_path=r"C:\b\bar.exe.i64"),
+def test_sessions_paginates_discovered_rows(monkeypatch, capsys):
+    rows = [
+        {
+            "id": name,
+            "status": "ready",
+            "pid": index,
+            "port": index + 10,
+            "input_path": f"/{name}",
+            "_entry": object(),
+        }
+        for index, name in enumerate(("a", "b", "c"))
     ]
-    monkeypatch.setattr(registry, "list_all", lambda: entries)
-    assert cli.resolve_session(_ns(idb=r"C:\b\foo.exe"))["id"] == "a"
-    assert cli.resolve_session(_ns(idb=r"C:\b\bar.exe.i64"))["id"] == "b"
-
-
-def test_sessions_paginates_local_rows(monkeypatch, capsys):
-    monkeypatch.setattr(registry, "list_all", lambda: [_entry("a"), _entry("b"), _entry("c")])
-    monkeypatch.setattr(registry, "probe", lambda e: "ready")
+    monkeypatch.setattr(cli.codemode, "list_databases", lambda: rows)
 
     assert cli.cmd_sessions(_ns(offset=1, count=1)) == 0
 
     captured = capsys.readouterr()
-    lines = captured.out.splitlines()
-    assert len(lines) == 2
-    assert lines[1].split()[0] == "b"
+    assert captured.out.splitlines()[1].split()[0] == "b"
     assert "[+more; resume with -o 2]" in captured.err
+
+
+class FakeHandle:
+    entry = SimpleNamespace(
+        record_id="123-abcdef", backend="gui", port=123, pid=456
+    )
+
+    def __init__(self, envelope):
+        self.envelope = envelope
+        self.closed = False
+        self.waited = False
+
+    def wait_autoanalysis(self, timeout):
+        self.waited = True
+        return {"status": "complete", "complete": True}
+
+    def execute_python(self, code, timeout):
+        return {"result": self.envelope, "stdout": "", "stderr": ""}
+
+    def save_database(self):
+        return {"saved": True, "idb_path": "/tmp/sample.i64"}
+
+    def close(self):
+        self.closed = True
+
+
+def test_run_remote_uses_and_releases_one_database_handle(monkeypatch, capsys):
+    handle = FakeHandle(protocol.build_ok(0, {"data": []}))
+    monkeypatch.setattr(cli, "resolve_session", lambda ns: "/tmp/sample")
+    monkeypatch.setattr(cli.codemode, "open_handle", lambda *a, **kw: handle)
+
+    assert cli.run_remote(_ns(), "names", {}) == 0
+
+    assert handle.waited and handle.closed
+    assert "(no names)" in capsys.readouterr().out
+
+
+def test_save_uses_official_database_handle(monkeypatch, capsys):
+    handle = FakeHandle(protocol.build_ok(0, {}))
+    monkeypatch.setattr(cli, "resolve_session", lambda ns: "/tmp/sample")
+    monkeypatch.setattr(cli.codemode, "open_handle", lambda *a, **kw: handle)
+
+    assert cli.run_remote(_ns(), "save", {}) == 0
+
+    assert handle.closed
+    assert "saved sample.i64" in capsys.readouterr().out
 
 
 def test_disas_forwards_pagination_flags():
@@ -308,150 +329,24 @@ def test_eval_width_flag():
     assert _request(["eval", "0n42", "-w", "4"]) == ("eval", {"expr": "0n42", "width": 4})
 
 
-def _close_ns(argv):
-    return cli.normalize_namespace(cli.build_parser().parse_args(argv))
-
-
-def test_close_positional_sets_session(monkeypatch):
-    captured = {}
-
-    def fake_resolve(ns):
-        captured["session"] = ns.session
-        return {"id": ns.session, "port": 1, "token": "t", "pid": 1}
-
-    monkeypatch.setattr(cli, "resolve_session", fake_resolve)
-    monkeypatch.setattr(cli, "_close_one", lambda *a, **k: "closed")
-    assert cli.cmd_close(_close_ns(["close", "myid"])) == 0
-    assert captured["session"] == "myid"
-
-
-def test_close_matching_s_and_positional_is_allowed(monkeypatch):
-    captured = {}
-
-    def fake_resolve(ns):
-        captured["session"] = ns.session
-        return {"id": ns.session, "port": 1, "token": "t", "pid": 1}
-
-    monkeypatch.setattr(cli, "resolve_session", fake_resolve)
-    monkeypatch.setattr(cli, "_close_one", lambda *a, **k: "closed")
-    assert cli.cmd_close(_close_ns(["-s", "dup", "close", "dup"])) == 0
-    assert captured["session"] == "dup"
-
-
-def test_close_mismatched_s_and_positional_rejected():
-    with pytest.raises(IdbError) as ei:
-        cli.cmd_close(_close_ns(["-s", "a", "close", "b"]))
-    assert ei.value.code == protocol.BAD_ARGS
-
-
-def test_close_positional_with_all_rejected():
-    with pytest.raises(IdbError) as ei:
-        cli.cmd_close(_close_ns(["close", "--all", "x"]))
-    assert ei.value.code == protocol.BAD_ARGS
-
-
-def test_close_kill_reports_failure(monkeypatch):
-    entry = {"id": "dead", "port": 1, "token": "t", "pid": 1234}
-    unregistered = []
-    monkeypatch.setattr(cli.spawn, "kill_pid", lambda pid: False)
-    monkeypatch.setattr(registry, "unregister", unregistered.append)
-
-    with pytest.raises(IdbError) as ei:
-        cli._close_one(entry, kill=True, save=True)
-
-    assert ei.value.code == protocol.IDA_ERROR
-    assert unregistered == []
-
-
-def test_close_kill_unregisters_after_success(monkeypatch):
-    entry = {"id": "dead", "port": 1, "token": "t", "pid": 1234}
-    unregistered = []
-    monkeypatch.setattr(cli.spawn, "kill_pid", lambda pid: True)
-    monkeypatch.setattr(registry, "unregister", unregistered.append)
-
-    assert cli._close_one(entry, kill=True, save=True) == "killed dead (pid 1234)"
-    assert unregistered == ["dead"]
-
-
-class _FakeClient:
-    """Stands in for cli.ZmqClient: replies ok to shutdown, or raises on call."""
-
-    def __init__(self, port, token, raises=None):
-        self.raises = raises
-
-    def call(self, cmd, args=None, timeout_ms=0):
-        if self.raises:
-            raise self.raises
-        return protocol.build_ok(1, {"stopping": True})
-
-    def close(self):
-        pass
-
-
-def test_close_leaves_entry_while_worker_still_saving(monkeypatch):
-    entry = {"id": "slow", "port": 1, "token": "t", "pid": 1234}
-    unregistered = []
-    monkeypatch.setattr(cli, "ZmqClient", _FakeClient)
-    monkeypatch.setattr(registry, "pid_alive", lambda pid: True)
-    monkeypatch.setattr(registry, "unregister", unregistered.append)
-
-    msg = cli._close_one(entry, kill=False, save=True, timeout_s=0.05)
-
-    assert "still saving" in msg
-    assert unregistered == []
-
-
-def test_close_unregisters_after_worker_exits(monkeypatch):
-    entry = {"id": "quick", "port": 1, "token": "t", "pid": 1234}
-    unregistered = []
-    monkeypatch.setattr(cli, "ZmqClient", _FakeClient)
-    monkeypatch.setattr(registry, "pid_alive", lambda pid: False)
-    monkeypatch.setattr(registry, "unregister", unregistered.append)
-
-    assert cli._close_one(entry, kill=False, save=True, timeout_s=0.05) == "closed quick (save=True)"
-    assert unregistered == ["quick"]
-
-
-def test_run_remote_timeout_adds_busy_hint_when_pid_alive(monkeypatch):
-    entry = {"id": "busy1", "port": 1, "token": "t", "pid": 1234}
-    timeout_err = IdbError(protocol.TIMEOUT, "no reply from worker within 100 ms")
-    monkeypatch.setattr(cli, "resolve_session", lambda ns: entry)
-    monkeypatch.setattr(cli, "ZmqClient", lambda port, token: _FakeClient(port, token, raises=timeout_err))
-    monkeypatch.setattr(registry, "pid_alive", lambda pid: True)
-
-    with pytest.raises(IdbError) as ei:
-        cli.run_remote(_ns(timeout=None), "funcs", {})
-
-    assert ei.value.code == protocol.TIMEOUT
-    assert "alive but busy" in ei.value.message
-
-
-def test_run_remote_timeout_unchanged_when_pid_dead(monkeypatch):
-    entry = {"id": "gone", "port": 1, "token": "t", "pid": 1234}
-    timeout_err = IdbError(protocol.TIMEOUT, "no reply from worker within 100 ms")
-    monkeypatch.setattr(cli, "resolve_session", lambda ns: entry)
-    monkeypatch.setattr(cli, "ZmqClient", lambda port, token: _FakeClient(port, token, raises=timeout_err))
-    monkeypatch.setattr(registry, "pid_alive", lambda pid: False)
-
-    with pytest.raises(IdbError) as ei:
-        cli.run_remote(_ns(timeout=None), "funcs", {})
-
-    assert ei.value.message == "no reply from worker within 100 ms"
-
-
 def test_help_alias_prints_root_help(capsys):
     assert cli.main(["help"]) == 0
     assert "usage: idb" in capsys.readouterr().out
 
 
 def test_help_alias_with_command_prints_command_help(capsys):
-    assert cli.main(["help", "close"]) == 0
-    assert "idb close" in capsys.readouterr().out
+    assert cli.main(["help", "save"]) == 0
+    assert "idb save" in capsys.readouterr().out
 
 
 def test_help_is_not_a_registered_subcommand():
     with pytest.raises(SystemExit):
         cli.build_parser().parse_args(["help"])
+
+
+def test_close_is_not_a_registered_subcommand():
+    with pytest.raises(SystemExit):
+        cli.build_parser().parse_args(["close"])
 
 
 def test_emit_renders_struct_redirect_and_warns_on_stderr(capsys):

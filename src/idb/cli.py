@@ -1,5 +1,8 @@
-"""idb command-line front end. Imports NO ida_* / idapro — it resolves a session
-from the registry files and does one RPC round-trip per invocation.
+"""idb command-line front end over official IDA Code Mode handles.
+
+Every invocation discovers or opens a registered database, performs one Code
+Mode operation, and releases its handle. No idb daemon or cross-process lease is
+retained.
 
 Windbg-flavored aliases (u, dec, db/dw/dd/dq, da/du, x, ln, dt) are
 accepted by argparse, then canonicalized through the ALIASES table so aliases
@@ -10,10 +13,9 @@ different widths).
 import argparse
 import sys
 
-from idb import __version__, protocol, registry, spawn
+from idb import __version__, codemode, protocol
 from idb import doctor as doctor_mod
-from idb.errors import IdbError, exit_code_for, NO_SESSION, AMBIGUOUS
-from idb.transport import ZmqClient
+from idb.errors import IdbError, exit_code_for, AMBIGUOUS
 from idb.fmt import (
     listing,
     disasm as fmt_disasm,
@@ -101,8 +103,6 @@ FORMATTERS = {
     "union_select": fmt_writes.format_union_select,
 }
 
-_LIVE = (registry.STATUS_READY, registry.STATUS_BUSY, registry.STATUS_ANALYZING)
-
 _GLOBAL_DEFAULTS = {
     "session": None,
     "idb": None,
@@ -169,9 +169,10 @@ def _add_flags(sp, name):
                          if name in _TOTAL_CMDS else argparse.SUPPRESS)
 
 _ROOT_DESCRIPTION = (
-    "IDA Pro Buddy - drive a headless IDA session from the shell. Each call resolves a worker "
-    "and does one RPC round-trip; open a database first with `idb open <file>`, then target it "
-    "with -s/--idb (when only one session is live, it is used; with 2+ you must disambiguate). "
+    "IDA Pro Buddy - drive a registered IDA GUI or managed idalib session from the shell. "
+    "Each call opens an official Code Mode DatabaseHandle, performs one operation, and releases "
+    "it. Use --idb <path> to spawn/target idalib explicitly; when exactly one registered "
+    "database is live it is selected automatically. "
     "WinDbg-style aliases "
     "(u, dec, db/dw/dd/dq, da/du, x, ln, dt, s) are recommended."
 )
@@ -204,20 +205,14 @@ def build_parser():
         _add_flags(sp, name)
         return sp
 
-    sp = cmd("open", help="spawn+analyze a binary/db and print a summary",
+    sp = cmd("open", help="attach to a registered GUI or managed idalib database",
              ex=(r"open C:\bins\foo.exe", "open foo.exe --fresh"))
     sp.add_argument("target")
-    sp.add_argument("--fresh", action="store_true", help="re-analyze from the binary")
+    sp.add_argument("--fresh", action="store_true",
+                    help="create a new IDB from the input (refuses a live owner)")
 
-    cmd("sessions", help="list workers", ex=("sessions",))
-    sp = cmd("close", help="shut a worker down",
-             ex=("close", "close foo.exe-1a2b3c4d", "close --all --no-save"))
-    sp.add_argument("session_pos", nargs="?", default=None, metavar="session",
-                    help="session id to close (alternative to -s)")
-    sp.add_argument("--no-save", dest="no_save", action="store_true")
-    sp.add_argument("--kill", action="store_true", help="TerminateProcess (wedged worker)")
-    sp.add_argument("--all", action="store_true")
-    cmd("save", help="persist the .i64 now", ex=("save",))
+    cmd("sessions", help="list registered Code Mode databases", ex=("sessions",))
+    cmd("save", help="persist the .i64 now", ex=("save --idb foo.exe",))
     cmd("doctor", help="probe the environment", ex=("doctor",))
 
     cmd("segments", help="segments + rwx", ex=("segments --total",))
@@ -510,29 +505,14 @@ def build_request(ns):
 
 
 def resolve_session(ns):
-    registry.cleanup_stale()
-    entries = registry.list_all()
-    if ns.session:
-        matched = registry.match(entries, session=ns.session)
-        if not matched:
-            raise IdbError(NO_SESSION, f"no session named {ns.session!r}")
-        return matched[0]
-    if ns.idb:
-        matched = registry.match(entries, idb=ns.idb)
-        if not matched:
-            raise IdbError(NO_SESSION, f"no session for {ns.idb!r}")
-        if len(matched) > 1:
-            print(fmt_sessions.format_sessions(matched), file=sys.stderr)
-            raise IdbError(AMBIGUOUS, f"{len(matched)} sessions match {ns.idb!r}; use -s")
-        return matched[0]
-    live = [e for e in entries if registry.probe(e) in _LIVE]
-    if not live:
-        raise IdbError(NO_SESSION, "no running sessions; run `idb open <binary>` first")
-    if len(live) == 1:
-        return live[0]
-    print(fmt_sessions.format_sessions([{**e, "status": registry.probe(e)} for e in live]),
-          file=sys.stderr)
-    raise IdbError(AMBIGUOUS, f"{len(live)} sessions; disambiguate with -s <id> or --idb <path>")
+    """Resolve to a Code Mode path; retained idb sessions no longer exist."""
+    try:
+        return codemode.resolve_target(session=ns.session, idb=ns.idb)
+    except IdbError as exc:
+        if exc.code == AMBIGUOUS and isinstance(exc.data, list):
+            print(fmt_sessions.format_sessions(exc.data), file=sys.stderr)
+            raise IdbError(exc.code, exc.message) from exc
+        raise
 
 
 def _banner(meta):
@@ -563,38 +543,64 @@ def emit(rpc_cmd, reply, ns):
     return 0
 
 
+def _transport_error(exc):
+    code = protocol.TIMEOUT if "timed out" in str(exc).lower() else protocol.IDA_ERROR
+    return IdbError(code, f"{type(exc).__name__}: {exc}")
+
+
 def run_remote(ns, rpc_cmd, rpc_args):
-    entry = resolve_session(ns)
-    client = ZmqClient(entry["port"], entry["token"])
-    timeout = ns.timeout if ns.timeout else DEFAULT_TIMEOUT
+    target = resolve_session(ns)
+    open_timeout = ns.timeout if ns.timeout else 600.0
+    execute_timeout = ns.timeout if ns.timeout else DEFAULT_TIMEOUT
+    handle = None
     try:
-        reply = client.call(rpc_cmd, rpc_args, timeout_ms=int(timeout * 1000))
-    except IdbError as exc:
-        # The REP loop is serial: a timeout usually means another (or a long)
-        # request is in flight, not a dead worker. Say so before someone
-        # reaches for `close --kill` on a healthy session.
-        if exc.code == protocol.TIMEOUT and registry.pid_alive(entry.get("pid")):
-            raise IdbError(
-                protocol.TIMEOUT,
-                f"{exc.message}; worker {entry['id']} is alive but busy "
-                "(likely serving a long request) — retry or raise -t",
-            ) from exc
+        handle = codemode.open_handle(target, timeout=open_timeout)
+        handle.wait_autoanalysis(open_timeout)
+        if rpc_cmd == "save":
+            saved = handle.save_database()
+            reply = protocol.build_ok(0, {"saved": saved["idb_path"]})
+        else:
+            execution = handle.execute_python(
+                codemode.execute_code(rpc_cmd, rpc_args),
+                timeout=execute_timeout,
+            )
+            reply = codemode.envelope_from_execution(execution)
+    except IdbError:
         raise
+    except Exception as exc:
+        raise _transport_error(exc) from exc
     finally:
-        client.close()
+        if handle is not None:
+            handle.close()
     return emit(rpc_cmd, reply, ns)
 
 
 def cmd_open(ns):
-    entry, summary = spawn.open_or_reuse(
-        ns.target,
-        fresh=ns.fresh,
-        deadline_s=ns.timeout if ns.timeout else spawn.DEFAULT_OPEN_DEADLINE,
-    )
-    print(listing.format_open_summary(summary))
-    if ns.verbose:
-        print(f"session {entry['id']}  port {entry['port']}  pid {entry['pid']}", file=sys.stderr)
-    return 0
+    timeout = ns.timeout if ns.timeout else 600.0
+    handle = None
+    try:
+        handle = codemode.open_handle(ns.target, timeout=timeout, fresh=ns.fresh)
+        handle.wait_autoanalysis(timeout)
+        execution = handle.execute_python(
+            codemode.initialize_code(handle.entry.record_id, ns.target),
+            timeout=timeout,
+        )
+        reply = codemode.envelope_from_execution(execution)
+        if ns.verbose:
+            entry = handle.entry
+            print(
+                f"instance {entry.record_id}  backend {entry.backend}  "
+                f"port {entry.port}  pid {entry.pid}",
+                file=sys.stderr,
+            )
+    except IdbError:
+        raise
+    except Exception as exc:
+        raise _transport_error(exc) from exc
+    finally:
+        if handle is not None:
+            handle.close()
+    return emit("open_summary", reply, ns)
 
 
 def _emit_paginated(rows, formatter, ns):
@@ -606,61 +612,10 @@ def _emit_paginated(rows, formatter, ns):
 
 
 def cmd_sessions(ns):
-    registry.cleanup_stale()
-    rows = [{**e, "status": registry.probe(e) or "dead"} for e in registry.list_all()]
+    rows = codemode.list_databases()
+    for row in rows:
+        row.pop("_entry", None)
     _emit_paginated(rows, fmt_sessions.format_sessions, ns)
-    return 0
-
-
-def _close_one(entry, kill, save, timeout_s=20.0):
-    import time
-
-    sid, pid = entry["id"], entry.get("pid")
-    if kill:
-        if not spawn.kill_pid(pid):
-            raise IdbError(protocol.IDA_ERROR, f"could not kill {sid} (pid {pid})")
-        registry.unregister(sid)
-        return f"killed {sid} (pid {pid})"
-    client = ZmqClient(entry["port"], entry["token"])
-    try:
-        client.call("shutdown", {"save": save}, timeout_ms=15000)
-    except IdbError:
-        if not spawn.kill_pid(pid):
-            raise IdbError(protocol.IDA_ERROR, f"{sid} unreachable; could not kill pid {pid}")
-        registry.unregister(sid)
-        return f"{sid} unreachable; killed"
-    finally:
-        client.close()
-    deadline = time.time() + timeout_s
-    while time.time() < deadline and registry.pid_alive(pid):
-        time.sleep(0.1)
-    if registry.pid_alive(pid):
-        # Still saving (large .i64). The entry must outlive the save so a
-        # concurrent `idb open` cannot spawn a second worker over it; the
-        # worker unregisters itself once close_database finishes.
-        return f"{sid} shutting down; still saving (pid {pid}); it will clear its session entry when done"
-    registry.unregister(sid)
-    return f"closed {sid} (save={save})"
-
-
-def cmd_close(ns):
-    if ns.session_pos is not None:
-        if ns.session and ns.session != ns.session_pos:
-            raise IdbError(protocol.BAD_ARGS,
-                           f"close got -s {ns.session!r} and positional {ns.session_pos!r}; "
-                           "pass the session id once")
-        if ns.all:
-            raise IdbError(protocol.BAD_ARGS, "close takes a session id or --all, not both")
-        ns.session = ns.session_pos
-    if ns.all:
-        targets = registry.list_all()
-        if not targets:
-            print("no sessions to close", file=sys.stderr)
-            return 0
-    else:
-        targets = [resolve_session(ns)]
-    for entry in targets:
-        print(_close_one(entry, kill=ns.kill, save=not ns.no_save), file=sys.stderr)
     return 0
 
 
@@ -673,7 +628,6 @@ def cmd_doctor(ns):
 LIFECYCLE = {
     "open": cmd_open,
     "sessions": cmd_sessions,
-    "close": cmd_close,
     "doctor": cmd_doctor,
 }
 

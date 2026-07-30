@@ -1,13 +1,12 @@
 """Real CLI integration tests focused on actual idb usage.
 
 These tests intentionally run ``python -m idb ...`` subprocesses instead of
-calling worker RPCs directly. The goal is to cover the surface users and agents
+calling remote handlers directly. The goal is to cover the surface users and agents
 actually interact with: command aliases, stdout/stderr separation, pagination
 prompts, exit codes, and short multi-command workflows.
 """
 
 import importlib.util
-import json
 import os
 import pathlib
 import re
@@ -54,14 +53,11 @@ def _env_for(workspace):
     return env
 
 
-def _session_dir(env):
-    base = pathlib.Path(env["LOCALAPPDATA"] if sys.platform == "win32" else env["XDG_STATE_HOME"])
-    return base / "ida-buddy" / "sessions"
-
-
 def _run(env, *args, timeout=90, check=True):
+    target = env.get("IDB_TEST_TARGET")
+    prefix = ["--idb", target] if target and args[0] not in {"open", "sessions", "doctor"} else []
     res = subprocess.run(
-        [sys.executable, "-m", "idb", *map(str, args)],
+        [sys.executable, "-m", "idb", *prefix, *map(str, args)],
         cwd=ROOT,
         env=env,
         text=True,
@@ -91,6 +87,7 @@ def cli_workspace():
     workspace = ROOT / ".tmp" / "idb-cli-it" / f"{os.getpid()}-{uuid.uuid4().hex}"
     target = _copy_input_tree(workspace / "inputs")
     env = _env_for(workspace)
+    env["IDB_TEST_TARGET"] = str(target)
     try:
         yield workspace, target, env
     finally:
@@ -104,8 +101,7 @@ def cli_session(cli_workspace):
     try:
         yield {"target": target, "env": env, "open": opened}
     finally:
-        _run(env, "close", "--no-save", timeout=90, check=False)
-        time.sleep(0.5)
+        time.sleep(35)  # zero-lease grace plus IDB save/close
 
 
 def _first_function(env):
@@ -151,45 +147,6 @@ def test_sessions_lists_live_worker(cli_session):
     assert target.name in res.stdout
     assert "ready" in res.stdout or "busy" in res.stdout
     assert res.stderr.strip() == ""
-
-
-def test_sessions_pagination_banner_stays_on_stderr(cli_session):
-    env = cli_session["env"]
-    sessions = _session_dir(env)
-    sessions.mkdir(parents=True, exist_ok=True)
-    extra = sessions / "zz-extra.json"
-    extra.write_text(
-        json.dumps(
-            {
-                "v": 1,
-                "id": "zz-extra",
-                "input_path": r"C:\extra\sample.exe",
-                "status": "ready",
-                "pid": os.getpid(),
-                "started_at": time.time(),
-            }
-        ),
-        encoding="utf-8",
-    )
-    try:
-        res = _run(env, "sessions", "-n", "1")
-    finally:
-        extra.unlink(missing_ok=True)
-
-    assert len(res.stdout.splitlines()) == 2
-    assert "[+more; resume with -o 1]" in res.stderr
-
-
-def test_no_session_error_is_actionable(cli_workspace):
-    workspace, _target, _session_env = cli_workspace
-    env = _env_for(workspace / "empty-state")
-
-    res = _run(env, "funcs", check=False)
-
-    assert res.returncode == 3
-    assert res.stdout == ""
-    assert "no running sessions" in res.stderr
-    assert "idb open <binary>" in res.stderr
 
 
 def test_listing_pagination_and_total_contract(cli_session):

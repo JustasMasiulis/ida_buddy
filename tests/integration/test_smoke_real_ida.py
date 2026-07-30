@@ -1,20 +1,14 @@
-"""Tier-4 smoke tests against a real headless IDA worker.
+"""Tier-4 smoke tests through one direct Code Mode DatabaseHandle.
 
-Gated on idapro being importable and a test binary existing (IDB_TEST_BINARY, or
-the bundled tests/fixtures/where.exe). One warm worker is shared across the module
-in an isolated registry; each phase appends cases here.
+Gated on IDA being available and a test binary existing. The module retains one
+handle only to avoid reopening IDA between dozens of integration assertions.
 """
 
 import importlib.util
 import os
-import shutil
-import tempfile
-import time
-
 import pytest
 
-from idb import protocol, spawn
-from idb.transport import ZmqClient
+from idb import codemode, protocol
 
 BINARY = os.environ.get(
     "IDB_TEST_BINARY",
@@ -24,36 +18,42 @@ _AVAILABLE = importlib.util.find_spec("idapro") is not None and os.path.exists(B
 pytestmark = pytest.mark.skipif(not _AVAILABLE, reason="needs idapro + a test binary")
 
 
+class DirectClient:
+    def __init__(self, handle):
+        self.handle = handle
+        self.entry = handle.entry
+        execution = handle.execute_python(
+            codemode.initialize_code(handle.entry.record_id, BINARY),
+            timeout=300,
+        )
+        envelope = codemode.envelope_from_execution(execution)
+        assert protocol.is_ok(envelope), envelope
+        self.summary = envelope["result"]
+
+    def call(self, command, arguments=None, timeout_ms=20000):
+        if command == "ping":
+            return protocol.build_ok(0, {"status": "ready"})
+        if command == "save":
+            result = self.handle.save_database()
+            return protocol.build_ok(0, {"saved": result["idb_path"]})
+        execution = self.handle.execute_python(
+            codemode.execute_code(command, arguments or {}),
+            timeout=timeout_ms / 1000,
+        )
+        return codemode.envelope_from_execution(execution)
+
+    def close(self):
+        self.handle.close()
+
+
 @pytest.fixture(scope="module")
 def client():
-    tmp = tempfile.mkdtemp(prefix="idb-it-")
-    saved = {k: os.environ.get(k) for k in ("LOCALAPPDATA", "XDG_STATE_HOME")}
-    os.environ["LOCALAPPDATA"] = tmp
-    os.environ["XDG_STATE_HOME"] = tmp
-    entry = None
+    handle = codemode.open_handle(BINARY, timeout=300)
     try:
-        entry, summary = spawn.open_or_reuse(BINARY, deadline_s=300)
-        conn = ZmqClient(entry["port"], entry["token"])
-        conn.summary = summary
-        conn.entry = entry
-        yield conn
-        conn.close()
+        handle.wait_autoanalysis(300)
+        yield DirectClient(handle)
     finally:
-        if entry is not None:
-            killer = ZmqClient(entry["port"], entry["token"])
-            try:
-                killer.call("shutdown", {"save": False}, timeout_ms=15000)
-            except Exception:
-                spawn.kill_pid(entry.get("pid"))
-            finally:
-                killer.close()
-            time.sleep(0.5)
-        for key, value in saved.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
-        shutil.rmtree(tmp, ignore_errors=True)
+        handle.close()
 
 
 def ok(conn, cmd, args=None, timeout_ms=20000):
