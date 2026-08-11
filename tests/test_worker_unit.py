@@ -67,12 +67,13 @@ def test_idb_error_and_internal_error(handlers):
     assert dispatch.invoke("crash")["error"]["code"] == protocol.INTERNAL
 
 
-def test_not_ready(handlers):
+def test_not_ready(handlers, monkeypatch):
     @dispatch.handler("query")
     def query():
         return {}
 
-    assert dispatch.invoke("query", ready=False)["error"]["code"] == protocol.NOT_READY
+    monkeypatch.setattr(dispatch.CTX, "ready", False)
+    assert dispatch.invoke("query")["error"]["code"] == protocol.NOT_READY
 
 
 def test_write_handler_tolerates_unavailable_undo_api(handlers):

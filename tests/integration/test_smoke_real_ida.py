@@ -2,12 +2,28 @@
 
 Gated on IDA being available and a test binary existing. The module retains one
 handle only to avoid reopening IDA between dozens of integration assertions.
+The binary is analyzed as a private copy so the worker's autosave never writes
+an .i64 into the repo fixtures, and IDA_CODEMODE_STATE_DIR points the worker
+registry at the workspace so the user's real registry stays untouched.
 """
 
 import importlib.util
 import os
+import pathlib
+import shutil
+import uuid
+
 import pytest
 
+_WORKSPACE = (
+    pathlib.Path(__file__).resolve().parents[2]
+    / ".tmp" / "idb-smoke-it" / f"{os.getpid()}-{uuid.uuid4().hex}"
+)
+# ida_codemode computes its state/registry paths at import time; this must be
+# set before anything imports it (idb.codemode imports it lazily).
+os.environ["IDA_CODEMODE_STATE_DIR"] = str(_WORKSPACE / "codemode")
+
+from _helpers import kill_pid, remove_workspace
 from idb import codemode, protocol
 
 BINARY = os.environ.get(
@@ -23,7 +39,7 @@ class DirectClient:
         self.handle = handle
         self.entry = handle.entry
         execution = handle.execute_python(
-            codemode.initialize_code(handle.entry.record_id, BINARY),
+            codemode.initialize_code(),
             timeout=300,
         )
         envelope = codemode.envelope_from_execution(execution)
@@ -31,11 +47,9 @@ class DirectClient:
         self.summary = envelope["result"]
 
     def call(self, command, arguments=None, timeout_ms=20000):
-        if command == "ping":
-            return protocol.build_ok(0, {"status": "ready"})
         if command == "save":
             result = self.handle.save_database()
-            return protocol.build_ok(0, {"saved": result["idb_path"]})
+            return protocol.build_ok({"saved": result["idb_path"]})
         execution = self.handle.execute_python(
             codemode.execute_code(command, arguments or {}),
             timeout=timeout_ms / 1000,
@@ -48,12 +62,25 @@ class DirectClient:
 
 @pytest.fixture(scope="module")
 def client():
-    handle = codemode.open_handle(BINARY, timeout=300)
+    inputs = _WORKSPACE / "inputs"
+    inputs.mkdir(parents=True, exist_ok=True)
+    target = str(inputs / pathlib.Path(BINARY).name)
+    shutil.copy2(BINARY, target)
+    handle = codemode.open_handle(target, timeout=300)
     try:
         handle.wait_autoanalysis(300)
         yield DirectClient(handle)
     finally:
+        pid = handle.entry.pid
+        # Discard-shutdown: the worker must neither linger (WORKER_LINGER) nor
+        # autosave an .i64 for a throwaway workspace copy.
+        try:
+            handle.shutdown_database(save=False)
+        except Exception:
+            if pid:
+                kill_pid(pid)
         handle.close()
+        remove_workspace(_WORKSPACE)
 
 
 def ok(conn, cmd, args=None, timeout_ms=20000):

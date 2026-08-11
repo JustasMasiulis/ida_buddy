@@ -65,10 +65,18 @@ class FakeHandle:
         self.envelope = envelope
         self.closed = False
         self.waited = False
+        self.shutdowns = []
 
     def wait_autoanalysis(self, timeout):
         self.waited = True
         return {"status": "complete", "complete": True}
+
+    def poll_autoanalysis(self):
+        return {"status": "complete", "complete": True}
+
+    def shutdown_database(self, *, save):
+        self.shutdowns.append(save)
+        return {"shutting_down": True, "save": save}
 
     def execute_python(self, code, timeout):
         return {"result": self.envelope, "stdout": "", "stderr": ""}
@@ -81,7 +89,8 @@ class FakeHandle:
 
 
 def test_run_remote_uses_and_releases_one_database_handle(monkeypatch, capsys):
-    handle = FakeHandle(protocol.build_ok(0, {"data": []}))
+    handle = FakeHandle(protocol.build_ok({"data": []}))
+    handle.entry = SimpleNamespace(record_id="1-w", backend="idalib", port=1, pid=2)
     monkeypatch.setattr(cli, "resolve_session", lambda ns: "/tmp/sample")
     monkeypatch.setattr(cli.codemode, "open_handle", lambda *a, **kw: handle)
 
@@ -91,8 +100,21 @@ def test_run_remote_uses_and_releases_one_database_handle(monkeypatch, capsys):
     assert "(no names)" in capsys.readouterr().out
 
 
+def test_run_remote_never_waits_on_gui_analysis(monkeypatch, capsys):
+    # A GUI instance belongs to the analyst: the CLI must not block on (and
+    # thereby force-enable) its auto-analysis; the remote dispatcher answers
+    # NOT_READY instead.
+    handle = FakeHandle(protocol.build_ok({"data": []}))
+    monkeypatch.setattr(cli, "resolve_session", lambda ns: "/tmp/sample")
+    monkeypatch.setattr(cli.codemode, "open_handle", lambda *a, **kw: handle)
+
+    assert cli.run_remote(_ns(), "names", {}) == 0
+
+    assert not handle.waited and handle.closed
+
+
 def test_save_uses_official_database_handle(monkeypatch, capsys):
-    handle = FakeHandle(protocol.build_ok(0, {}))
+    handle = FakeHandle(protocol.build_ok({}))
     monkeypatch.setattr(cli, "resolve_session", lambda ns: "/tmp/sample")
     monkeypatch.setattr(cli.codemode, "open_handle", lambda *a, **kw: handle)
 
@@ -344,15 +366,36 @@ def test_help_is_not_a_registered_subcommand():
         cli.build_parser().parse_args(["help"])
 
 
-def test_close_is_not_a_registered_subcommand():
-    with pytest.raises(SystemExit):
-        cli.build_parser().parse_args(["close"])
+def test_close_shuts_down_and_discards(monkeypatch, capsys):
+    entry = SimpleNamespace(record_id="9-w", backend="idalib", port=1, pid=2)
+    handle = FakeHandle(protocol.build_ok({}))
+    handle.entry = entry
+    monkeypatch.setattr(cli, "resolve_session", lambda ns: entry)
+    monkeypatch.setattr(cli.codemode, "open_handle", lambda *a, **kw: handle)
+
+    ns = cli.build_parser().parse_args(["close", "--no-save"])
+    cli.normalize_namespace(ns)
+    assert cli.cmd_close(ns) == 0
+
+    assert handle.shutdowns == [False] and handle.closed
+    assert "changes discarded" in capsys.readouterr().err
+
+
+def test_close_refuses_gui_instances(monkeypatch):
+    entry = SimpleNamespace(record_id="9-g", backend="gui", port=1, pid=2)
+    monkeypatch.setattr(cli, "resolve_session", lambda ns: entry)
+
+    ns = cli.build_parser().parse_args(["close"])
+    cli.normalize_namespace(ns)
+    with pytest.raises(IdbError) as error:
+        cli.cmd_close(ns)
+    assert error.value.code == protocol.BAD_ARGS
 
 
 def test_emit_renders_struct_redirect_and_warns_on_stderr(capsys):
     result = {"addr": 0x2000, "wide": False, "length": 3, "maxlen": 4,
               "buffer": 0x3000, "text": "abc", "redirected_to_struct": True}
-    reply = protocol.build_ok(1, result, {"warning": "0x2000 is typed ANSI_STRING; use `ds`"})
+    reply = protocol.build_ok(result, {"warning": "0x2000 is typed ANSI_STRING; use `ds`"})
     assert cli.emit("string", reply, _ns()) == 0
     captured = capsys.readouterr()
     assert captured.out.strip() == '2000  ANSI_STRING len=3 max=4 buf=3000  "abc"'

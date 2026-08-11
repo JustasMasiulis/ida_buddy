@@ -15,7 +15,7 @@ import sys
 
 from idb import __version__, codemode, protocol
 from idb import doctor as doctor_mod
-from idb.errors import IdbError, exit_code_for, AMBIGUOUS
+from idb.errors import IdbError, exit_code_for, AMBIGUOUS, NO_SESSION
 from idb.fmt import (
     listing,
     disasm as fmt_disasm,
@@ -139,7 +139,7 @@ def _session_flags():
     g.add_argument("-s", "--session", default=argparse.SUPPRESS,
                    help="session id (see `idb sessions`)")
     g.add_argument("--idb", default=argparse.SUPPRESS,
-                   help="resolve the session by database/binary path")
+                   help="database/binary path; spawns a managed worker on demand")
     g.add_argument("-t", "--timeout", type=float, default=argparse.SUPPRESS,
                    help="client wait, seconds")
     g.add_argument("-v", "--verbose", action="count", default=argparse.SUPPRESS,
@@ -213,6 +213,13 @@ def build_parser():
 
     cmd("sessions", help="list registered Code Mode databases", ex=("sessions",))
     cmd("save", help="persist the .i64 now", ex=("save --idb foo.exe",))
+    sp = cmd("close", help="shut down a managed idalib worker (GUI databases close in IDA)",
+             ex=("close", "close --no-save", "close --all"))
+    sp.add_argument("session_pos", nargs="?", default=None, metavar="record-id",
+                    help="record id (same as -s)")
+    sp.add_argument("--all", action="store_true", help="close every managed worker")
+    sp.add_argument("--no-save", dest="no_save", action="store_true",
+                    help="discard unsaved changes instead of persisting them")
     cmd("doctor", help="probe the environment", ex=("doctor",))
 
     cmd("segments", help="segments + rwx", ex=("segments --total",))
@@ -505,7 +512,7 @@ def build_request(ns):
 
 
 def resolve_session(ns):
-    """Resolve to a Code Mode path; retained idb sessions no longer exist."""
+    """Resolve -s/--idb/default selection to a live instance RegistryEntry."""
     try:
         return codemode.resolve_target(session=ns.session, idb=ns.idb)
     except IdbError as exc:
@@ -543,46 +550,30 @@ def emit(rpc_cmd, reply, ns):
     return 0
 
 
-def _transport_error(exc):
-    code = protocol.TIMEOUT if "timed out" in str(exc).lower() else protocol.IDA_ERROR
-    return IdbError(code, f"{type(exc).__name__}: {exc}")
-
-
 def run_remote(ns, rpc_cmd, rpc_args):
-    target = resolve_session(ns)
-    open_timeout = ns.timeout if ns.timeout else 600.0
+    entry = resolve_session(ns)
+    open_timeout = ns.timeout if ns.timeout else codemode.OPEN_TIMEOUT
     execute_timeout = ns.timeout if ns.timeout else DEFAULT_TIMEOUT
-    handle = None
-    try:
-        handle = codemode.open_handle(target, timeout=open_timeout)
-        handle.wait_autoanalysis(open_timeout)
+    with codemode.session(entry, timeout=open_timeout) as handle:
         if rpc_cmd == "save":
             saved = handle.save_database()
-            reply = protocol.build_ok(0, {"saved": saved["idb_path"]})
+            reply = protocol.build_ok({"saved": saved["idb_path"]})
         else:
             execution = handle.execute_python(
                 codemode.execute_code(rpc_cmd, rpc_args),
                 timeout=execute_timeout,
             )
             reply = codemode.envelope_from_execution(execution)
-    except IdbError:
-        raise
-    except Exception as exc:
-        raise _transport_error(exc) from exc
-    finally:
-        if handle is not None:
-            handle.close()
     return emit(rpc_cmd, reply, ns)
 
 
 def cmd_open(ns):
-    timeout = ns.timeout if ns.timeout else 600.0
-    handle = None
-    try:
-        handle = codemode.open_handle(ns.target, timeout=timeout, fresh=ns.fresh)
-        handle.wait_autoanalysis(timeout)
+    timeout = ns.timeout if ns.timeout else codemode.OPEN_TIMEOUT
+    target = codemode.validate_path(ns.target)
+    with codemode.session(target, timeout=timeout, fresh=ns.fresh) as handle:
+        gui = handle.entry.backend == "gui"
         execution = handle.execute_python(
-            codemode.initialize_code(handle.entry.record_id, ns.target),
+            codemode.initialize_code(warm=not gui),
             timeout=timeout,
         )
         reply = codemode.envelope_from_execution(execution)
@@ -593,13 +584,6 @@ def cmd_open(ns):
                 f"port {entry.port}  pid {entry.pid}",
                 file=sys.stderr,
             )
-    except IdbError:
-        raise
-    except Exception as exc:
-        raise _transport_error(exc) from exc
-    finally:
-        if handle is not None:
-            handle.close()
     return emit("open_summary", reply, ns)
 
 
@@ -619,6 +603,45 @@ def cmd_sessions(ns):
     return 0
 
 
+def _close_targets(ns):
+    if ns.all:
+        if ns.session or ns.idb:
+            raise IdbError(protocol.BAD_ARGS, "close takes a target or --all, not both")
+        return [entry for entry in codemode.registered_entries()
+                if entry.backend != "gui"]
+    if ns.idb:
+        if ns.session:
+            raise IdbError(protocol.BAD_ARGS, "pass either --session or --idb, not both")
+        entry = codemode.find_registered(ns.idb)
+        if entry is None:
+            raise IdbError(NO_SESSION, f"no registered database for {ns.idb!r}")
+        return [entry]
+    return [resolve_session(ns)]
+
+
+def cmd_close(ns):
+    if ns.session_pos is not None:
+        if ns.session and ns.session != ns.session_pos:
+            raise IdbError(protocol.BAD_ARGS,
+                           f"close got -s {ns.session!r} and positional {ns.session_pos!r}; "
+                           "pass the record id once")
+        ns.session = ns.session_pos
+    entries = _close_targets(ns)
+    if not entries:
+        print("no managed workers to close", file=sys.stderr)
+        return 0
+    save = not ns.no_save
+    for entry in entries:
+        if entry.backend == "gui":
+            raise IdbError(protocol.BAD_ARGS,
+                           f"{entry.record_id} is a GUI instance; close it in IDA itself")
+        with codemode.session(entry, timeout=30.0, linger=0.0, wait=False) as handle:
+            handle.shutdown_database(save=save)
+        print(f"closed {entry.record_id} ({'saved' if save else 'changes discarded'})",
+              file=sys.stderr)
+    return 0
+
+
 def cmd_doctor(ns):
     rows, ok = doctor_mod.run()
     _emit_paginated(rows, fmt_sessions.format_doctor, ns)
@@ -628,6 +651,7 @@ def cmd_doctor(ns):
 LIFECYCLE = {
     "open": cmd_open,
     "sessions": cmd_sessions,
+    "close": cmd_close,
     "doctor": cmd_doctor,
 }
 

@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "JustasMasiulis" }]
-dependencies = ["ida-codemode>=0.3.1"]
+dependencies = ["ida-codemode>=0.5.0"]
 
 [project.optional-dependencies]
 test = ["pytest>=8"]
@@ -27,3 +27,8 @@ addopts = "-ra"
 
 [tool.uv]
 prerelease = "allow"
+
+# attach()/poll_autoanalysis()/shutdown_database() are not yet released to
+# PyPI; drop this source once the api-changes branch ships as a release.
+[tool.uv.sources]
+ida-codemode = { git = "https://github.com/HexRaysSA/ida-codemode", branch = "api-changes" }

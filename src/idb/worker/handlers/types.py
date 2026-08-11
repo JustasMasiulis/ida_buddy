@@ -93,6 +93,7 @@ def type_(name, addr=None, offset=0, count=None):
         if addr is not None:
             raise IdbError(protocol.BAD_ARGS,
                            f"{name!r} is not a named type; name a struct/union to overlay {addr!r}")
+        return _typeof(name)
     result = {"name": name, "kind": _kind(tif), "size": tif.get_size(), "decl": str(tif)}
     if tif.is_union() or tif.is_struct():
         base = idahelp.resolve_target(addr) if addr is not None else None

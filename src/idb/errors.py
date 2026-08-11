@@ -2,14 +2,12 @@
 
 from . import protocol
 
-EXIT_OK = 0
 EXIT_ERROR = 1
 EXIT_USAGE = 2
 EXIT_NO_SESSION = 3
 EXIT_AMBIGUOUS = 4
 EXIT_NOT_READY = 5
 EXIT_TIMEOUT = 6
-EXIT_UNAUTHORIZED = 7
 
 NO_SESSION = "NO_SESSION"
 AMBIGUOUS = "AMBIGUOUS"
@@ -17,8 +15,6 @@ AMBIGUOUS = "AMBIGUOUS"
 _CODE_EXIT = {
     NO_SESSION: EXIT_NO_SESSION,
     AMBIGUOUS: EXIT_AMBIGUOUS,
-    protocol.BAD_REQUEST: EXIT_ERROR,
-    protocol.UNAUTHORIZED: EXIT_UNAUTHORIZED,
     protocol.UNKNOWN_CMD: EXIT_USAGE,
     protocol.BAD_ARGS: EXIT_USAGE,
     protocol.BAD_ADDRESS: EXIT_ERROR,
@@ -40,8 +36,8 @@ class IdbError(Exception):
         self.message = message
         self.data = data
 
-    def to_error(self, req_id):
-        return protocol.build_error(req_id, self.code, self.message, self.data)
+    def to_error(self):
+        return protocol.build_error(self.code, self.message, self.data)
 
 
 def exit_code_for(code) -> int:

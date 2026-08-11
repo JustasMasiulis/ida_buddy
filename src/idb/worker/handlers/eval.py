@@ -3,7 +3,8 @@
 The numeric work lives in the pure idb.expr module; this handler only supplies
 the IDA-backed operand resolver (idahelp.resolve_target) and the database word
 width / endianness. The result crosses the wire as a decimal string because an
-exact product can exceed 64 bits, which the msgpack codec cannot carry.
+exact product can exceed 64 bits, beyond the safe-integer range of the JSON
+consumers on the other end.
 """
 
 import ida_ida

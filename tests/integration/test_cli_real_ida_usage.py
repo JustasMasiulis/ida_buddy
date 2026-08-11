@@ -11,16 +11,12 @@ import os
 import pathlib
 import re
 import shutil
-import subprocess
-import sys
-import time
 import uuid
 
 import pytest
 
+from _helpers import ROOT, make_env, remove_workspace, shutdown_workers, run_idb as _run
 
-ROOT = pathlib.Path(__file__).resolve().parents[2]
-SRC = ROOT / "src"
 DEFAULT_BINARY = ROOT / "tests" / "fixtures" / "where.exe"
 BINARY = pathlib.Path(os.environ.get("IDB_TEST_BINARY", DEFAULT_BINARY)).resolve()
 
@@ -37,43 +33,6 @@ def _copy_input_tree(dst):
     return target
 
 
-def _env_for(workspace):
-    state = workspace / "state"
-    tmp = workspace / "tmp"
-    state.mkdir(parents=True, exist_ok=True)
-    tmp.mkdir(parents=True, exist_ok=True)
-
-    env = os.environ.copy()
-    env["LOCALAPPDATA"] = str(state)
-    env["XDG_STATE_HOME"] = str(state)
-    env["TEMP"] = str(tmp)
-    env["TMP"] = str(tmp)
-    old_pythonpath = env.get("PYTHONPATH")
-    env["PYTHONPATH"] = str(SRC) if not old_pythonpath else str(SRC) + os.pathsep + old_pythonpath
-    return env
-
-
-def _run(env, *args, timeout=90, check=True):
-    target = env.get("IDB_TEST_TARGET")
-    prefix = ["--idb", target] if target and args[0] not in {"open", "sessions", "doctor"} else []
-    res = subprocess.run(
-        [sys.executable, "-m", "idb", *prefix, *map(str, args)],
-        cwd=ROOT,
-        env=env,
-        text=True,
-        capture_output=True,
-        timeout=timeout,
-    )
-    if check and res.returncode != 0:
-        cmd = " ".join(["python", "-m", "idb", *map(str, args)])
-        pytest.fail(
-            f"{cmd} exited {res.returncode}\n"
-            f"stdout:\n{res.stdout}\n"
-            f"stderr:\n{res.stderr}"
-        )
-    return res
-
-
 @pytest.fixture(scope="module", autouse=True)
 def require_full_ida():
     if importlib.util.find_spec("idapro") is None:
@@ -86,12 +45,12 @@ def require_full_ida():
 def cli_workspace():
     workspace = ROOT / ".tmp" / "idb-cli-it" / f"{os.getpid()}-{uuid.uuid4().hex}"
     target = _copy_input_tree(workspace / "inputs")
-    env = _env_for(workspace)
+    env = make_env(workspace)
     env["IDB_TEST_TARGET"] = str(target)
     try:
         yield workspace, target, env
     finally:
-        shutil.rmtree(workspace, ignore_errors=True)
+        remove_workspace(workspace)
 
 
 @pytest.fixture(scope="module")
@@ -101,7 +60,7 @@ def cli_session(cli_workspace):
     try:
         yield {"target": target, "env": env, "open": opened}
     finally:
-        time.sleep(35)  # zero-lease grace plus IDB save/close
+        shutdown_workers(env)
 
 
 def _first_function(env):

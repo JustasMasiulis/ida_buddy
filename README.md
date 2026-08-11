@@ -37,6 +37,7 @@ Aliases in parens. `[mut]` mutates the database (creates an undo point).
 |---|---|
 | `open [--fresh] <path>` | attach to a registered GUI, or spawn managed idalib, then print summary |
 | `sessions` | list registered Code Mode databases |
+| `close [record-id] [--all] [--no-save]` | shut down a managed worker; `--no-save` discards unsaved changes |
 | `save` / `doctor` | persist the selected database / diagnose setup |
 | `segments` | segments + rwx |
 | `funcs [pat]` / `names <pat>` (`x`) / `nearest <addr>` (`ln`) | symbols |
@@ -88,8 +89,9 @@ idb --idb C:\bins\foo.exe save
 ```
 
 `--idb` can start a managed idalib worker on demand. After the command releases
-its handle, Code Mode keeps the worker through its zero-lease grace period,
-then saves and closes it. GUI databases are never closed by the CLI.
+its handle the worker lingers for up to an hour, so undo history survives
+between invocations (`idb undo` reverts a bad mutation); it saves and closes
+when the linger expires. GUI databases are never closed by the CLI.
 `open --fresh` creates a new IDB and refuses to run while a live instance owns
 the target.
 
@@ -102,6 +104,7 @@ idb sessions
 idb open C:\bins\foo.exe
 idb open foo.exe --fresh
 idb --idb C:\bins\foo.exe save
+idb close --no-save          # discard a bad session instead of persisting it
 
 # Database overview and symbols
 idb segments --total

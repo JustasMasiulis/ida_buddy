@@ -13,47 +13,16 @@ import os
 import pathlib
 import re
 import shutil
-import subprocess
-import sys
 import time
 import uuid
 
 import pytest
 
+from _helpers import ROOT, make_env, remove_workspace, shutdown_workers, run_idb as _run
 
-ROOT = pathlib.Path(__file__).resolve().parents[2]
-SRC = ROOT / "src"
 BINARY = pathlib.Path(
     os.environ.get("IDB_AUDIT_BINARY", ROOT / "tests" / "fixtures" / "hvix64.exe")
 ).resolve()
-
-
-def _env_for(workspace):
-    state = workspace / "state"
-    tmp = workspace / "tmp"
-    state.mkdir(parents=True, exist_ok=True)
-    tmp.mkdir(parents=True, exist_ok=True)
-    env = os.environ.copy()
-    env["LOCALAPPDATA"] = str(state)
-    env["XDG_STATE_HOME"] = str(state)
-    env["TEMP"] = str(tmp)
-    env["TMP"] = str(tmp)
-    old = env.get("PYTHONPATH")
-    env["PYTHONPATH"] = str(SRC) if not old else str(SRC) + os.pathsep + old
-    return env
-
-
-def _run(env, *args, timeout=120, check=True):
-    target = env.get("IDB_TEST_TARGET")
-    prefix = ["--idb", target] if target and args[0] not in {"open", "sessions", "doctor"} else []
-    res = subprocess.run(
-        [sys.executable, "-m", "idb", *prefix, *map(str, args)],
-        cwd=ROOT, env=env, text=True, capture_output=True, timeout=timeout,
-    )
-    if check and res.returncode != 0:
-        cmd = " ".join(["python", "-m", "idb", *map(str, args)])
-        pytest.fail(f"{cmd} exited {res.returncode}\nstdout:\n{res.stdout}\nstderr:\n{res.stderr}")
-    return res
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -71,16 +40,14 @@ def session():
     inputs.mkdir(parents=True, exist_ok=True)
     target = inputs / BINARY.name
     shutil.copy2(BINARY, target)
-    env = _env_for(workspace)
+    env = make_env(workspace)
     env["IDB_TEST_TARGET"] = str(target)
     _run(env, "open", target, "-t", "600", timeout=660)
     try:
         yield {"env": env, "target": target}
     finally:
-        # Each CLI call releases its own handle. Allow the managed worker's
-        # zero-lease grace period to save and exit before deleting the IDB.
-        time.sleep(35)
-        shutil.rmtree(workspace, ignore_errors=True)
+        shutdown_workers(env)
+        remove_workspace(workspace)
 
 
 _HEAD = re.compile(r"^audit_call_types\b.*scanned (\d+)\+?/(\d+) funcs\s+(\d+) call sites\s+(\d+) findings",

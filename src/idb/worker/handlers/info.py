@@ -1,4 +1,4 @@
-"""Session handlers: ping, shutdown, save, open_summary, segments."""
+"""Session handlers: ping, open_summary, segments."""
 
 import ida_ida
 import ida_nalt
@@ -9,8 +9,6 @@ import ida_loader
 import idautils
 import idc
 
-from idb import protocol
-from idb.errors import IdbError
 from idb.worker import idahelp
 from idb.worker.dispatch import handler, CTX
 
@@ -72,41 +70,25 @@ def _compute_summary():
     }
 
 
-def warmup():
-    try:
-        for _ in idautils.Strings():
+def warmup(prefetch_strings=True):
+    if prefetch_strings:
+        try:
+            for _ in idautils.Strings():
+                pass
+        except Exception:
             pass
-    except Exception:
-        pass
     _SUMMARY.clear()
     _SUMMARY.update(_compute_summary())
 
 
 @handler("ping", always=True)
 def ping():
-    return {
-        "status": "ready" if CTX.ready else "analyzing",
-        "session": CTX.session_id,
-    }
-
-
-@handler("shutdown", always=True)
-def shutdown(save=None):
-    return {"stopping": False, "save": save, "note": "Code Mode owns lifecycle"}
+    return {"status": "ready" if CTX.ready else "analyzing"}
 
 
 @handler("open_summary")
 def open_summary():
     return dict(_SUMMARY)
-
-
-@handler("save")
-def save():
-    path = idc.get_idb_path()
-    ok = ida_loader.save_database()
-    if not ok:
-        raise IdbError(protocol.IDA_ERROR, "save_database returned false")
-    return {"saved": path}
 
 
 @handler("segments")

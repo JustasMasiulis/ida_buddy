@@ -19,9 +19,30 @@ single registered database, discovery selects it automatically. `--idb <path>`
 provides stable targeting and allows Code Mode to start idalib on demand; `-s`
 selects a currently registered Code Mode record.
 
-Managed workers remain reusable only for Code Mode's zero-lease grace period.
-After that they save, close, and can be reopened by a later `--idb` command.
-GUI databases remain registered independently of CLI invocations.
+Managed workers are kept alive for `codemode.WORKER_LINGER` (one hour, the
+maximum lease keepalive ida-codemode allows) after the last handle closes, so
+IDA's in-memory undo history survives between CLI invocations: a bad mutation
+is recovered with `idb undo`, not by discarding the session. On shutdown the
+worker saves and closes; a later `--idb` command respawns it. GUI databases
+remain registered independently of CLI invocations.
+
+Explicit `-s <record-id>` selections attach to that instance's registry entry
+directly via `DatabaseHandle.attach` (no path re-resolution), so they can
+never land on a lookalike database or spawn a fresh worker. Auto-analysis is
+awaited only in managed workers; a GUI instance that is still analyzing
+answers NOT_READY through the non-mutating `poll_autoanalysis` endpoint
+instead of having auto-analysis force-enabled under the analyst.
+
+`idb close [--no-save]` shuts a managed worker down through Code Mode's
+`shutdown_database`, so unsaved changes can be discarded without killing the
+process. `attach`, `poll_autoanalysis`, and `shutdown_database` are not yet
+in a PyPI release; pyproject pins ida-codemode to the `api-changes` git
+branch until they ship.
+
+Code Mode's JSON wire has no bytes type (its fallback serializer produces
+repr() strings), so remote envelopes are passed through
+`protocol.encode_bytes`/`decode_bytes`, which tag raw payloads as
+`{"$idb.b64": <base64>}` and restore them client-side.
 
 The remote adapter adds this installation's package parent to IDA's `sys.path`
 and calls `idb.worker.remote` through `execute_python`. Both processes therefore
@@ -51,8 +72,7 @@ handler. Existing public IDAPython imports remain behind Code Mode for:
 - operand display changes and union-arm selection;
 - detailed in-place UDT member mutation;
 - complete stack-frame/chunk/SEH inspection;
-- lower-level Hex-Rays type auditing and cache control;
-- discard-on-close policy, which Code Mode intentionally does not expose.
+- lower-level Hex-Rays type auditing and cache control.
 
 Thus the official RPC surface is sufficient for the port, while ida-domain
 alone does not yet cover every low-level command.
