@@ -37,7 +37,7 @@ pytestmark = pytest.mark.skipif(not _AVAILABLE, reason="needs idapro + a test bi
 class DirectClient:
     def __init__(self, handle):
         self.handle = handle
-        self.entry = handle.entry
+        self.instance = handle.instance
         execution = handle.execute_python(
             codemode.initialize_code(),
             timeout=300,
@@ -71,7 +71,7 @@ def client():
         handle.wait_autoanalysis(300)
         yield DirectClient(handle)
     finally:
-        pid = handle.entry.pid
+        pid = handle.instance.pid
         # Discard-shutdown: the worker must neither linger (WORKER_LINGER) nor
         # autosave an .i64 for a throwaway workspace copy.
         try:

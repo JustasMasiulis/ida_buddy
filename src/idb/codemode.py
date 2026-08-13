@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import base64
 import json
-import os
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -81,11 +80,11 @@ def _entry_path(entry) -> str:
 
 def list_databases() -> list[dict[str, Any]]:
     """Return Code Mode discovery rows in the compact CLI formatter shape."""
-    from ida_codemode.registry import scan_instances
+    from ida_codemode import discover_databases
 
     rows = []
-    for discovered in scan_instances():
-        entry = discovered.entry
+    for discovered in discover_databases():
+        entry = discovered.instance
         rows.append(
             {
                 "id": entry.record_id,
@@ -114,7 +113,7 @@ def _require_ready(row):
 
 
 def resolve_target(*, session: str | None, idb: str | None):
-    """Resolve CLI selection to the RegistryEntry of a live instance, or to a
+    """Resolve CLI selection to the DatabaseInstance of a live instance, or to a
     validated path for ``--idb``, which resolves through Code Mode and may
     spawn a worker on demand."""
     if session and idb:
@@ -154,34 +153,28 @@ def resolve_target(*, session: str | None, idb: str | None):
 def validate_path(path: str) -> str:
     """Canonicalize a database/binary path and confirm it exists on disk.
     Shared by ``--idb`` resolution and ``idb open``."""
-    from ida_codemode.registry import canonical_path
-
-    if not Path(path).expanduser().is_file():
+    candidate = Path(path).expanduser()
+    if not candidate.is_file():
         raise IdbError(protocol.BAD_ARGS, f"no such file: {path}")
-    return canonical_path(path)
+    return str(candidate.resolve())
 
 
 def registered_entries():
-    """Registry records without health-probing — cheap, but may include a
-    record whose process has since exited.  For path/backend selection where
-    the subsequent attach surfaces staleness anyway."""
-    from ida_codemode.registry import read_records
+    """Return currently ready Code Mode database instances."""
+    from ida_codemode import InstanceState, discover_databases
 
-    return read_records()
+    return [
+        item.instance
+        for item in discover_databases()
+        if item.state is InstanceState.READY
+    ]
 
 
 def find_registered(path: str):
-    """Registry entry owning a path, or None.  Never spawns or health-probes."""
-    from ida_codemode.registry import canonical_path
+    """Return the live instance owning a path, if any."""
+    from ida_codemode import find_database_owner
 
-    wanted = os.path.normcase(canonical_path(path))
-    for entry in registered_entries():
-        candidates = [entry.idb_path]
-        if entry.exe_path:
-            candidates.append(entry.exe_path)
-        if any(wanted == os.path.normcase(candidate) for candidate in candidates):
-            return entry
-    return None
+    return find_database_owner(path)
 
 
 def open_handle(selection, *, timeout: float, fresh: bool = False,
@@ -189,18 +182,27 @@ def open_handle(selection, *, timeout: float, fresh: bool = False,
     """Open one official handle; the caller owns and must close it.
 
     A str selection is a path for ``idb open``/``--idb`` — it may spawn a
-    worker.  A RegistryEntry attaches to exactly that instance: no path
+    worker.  A DatabaseInstance attaches to exactly that instance: no path
     re-resolution, no GUI preference, no chance of spawning a lookalike.
     """
-    from ida_codemode.client import ClientError, DatabaseHandle
+    from ida_codemode import (
+        CodeModeConnectionError,
+        DatabaseHandle,
+        DatabaseOpenOptions,
+    )
 
     if isinstance(selection, str):
         return DatabaseHandle.open(
-            selection, timeout=timeout, new_database=fresh, keepalive=linger
+            selection,
+            options=DatabaseOpenOptions(
+                startup_timeout=timeout,
+                new_database=fresh,
+                keepalive=linger,
+            ),
         )
     try:
         return DatabaseHandle.attach(selection, keepalive=linger)
-    except ClientError as exc:
+    except CodeModeConnectionError as exc:
         raise IdbError(
             protocol.NOT_READY,
             f"Code Mode instance {selection.record_id} refused a lease "
@@ -229,11 +231,13 @@ def _await_analysis(handle, timeout):
     mid-initial-analysis instead fails NOT_READY via the non-mutating poll —
     never a silent multi-minute block, never force-enabled auto-analysis in the
     analyst's session."""
-    if handle.entry.backend != "gui":
+    if handle.instance.backend != "gui":
         handle.wait_autoanalysis(timeout)
     elif not handle.poll_autoanalysis().get("complete"):
-        raise IdbError(protocol.NOT_READY,
-                       f"GUI instance {handle.entry.record_id} is still auto-analyzing")
+        raise IdbError(
+            protocol.NOT_READY,
+            f"GUI instance {handle.instance.record_id} is still auto-analyzing",
+        )
 
 
 @contextmanager

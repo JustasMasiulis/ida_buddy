@@ -512,7 +512,7 @@ def build_request(ns):
 
 
 def resolve_session(ns):
-    """Resolve -s/--idb/default selection to a live instance RegistryEntry."""
+    """Resolve -s/--idb/default selection to a live instance DatabaseInstance."""
     try:
         return codemode.resolve_target(session=ns.session, idb=ns.idb)
     except IdbError as exc:
@@ -571,14 +571,14 @@ def cmd_open(ns):
     timeout = ns.timeout if ns.timeout else codemode.OPEN_TIMEOUT
     target = codemode.validate_path(ns.target)
     with codemode.session(target, timeout=timeout, fresh=ns.fresh) as handle:
-        gui = handle.entry.backend == "gui"
+        gui = handle.instance.backend == "gui"
         execution = handle.execute_python(
             codemode.initialize_code(warm=not gui),
             timeout=timeout,
         )
         reply = codemode.envelope_from_execution(execution)
         if ns.verbose:
-            entry = handle.entry
+            entry = handle.instance
             print(
                 f"instance {entry.record_id}  backend {entry.backend}  "
                 f"port {entry.port}  pid {entry.pid}",

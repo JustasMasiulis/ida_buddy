@@ -27,7 +27,7 @@ uv run idb doctor
 hcli plugin install https://github.com/HexRaysSA/ida-codemode
 ```
 
-For a packaged install, install `ida-codemode>=0.3.1` and `ida-buddy` in the same environment so the `ida-codemode-worker` console script is discoverable.
+For a packaged install, install `ida-codemode>=0.5.3` and `ida-buddy` in the same environment so the managed Code Mode worker is available.
 
 ## Commands
 

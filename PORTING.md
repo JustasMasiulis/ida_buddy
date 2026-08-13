@@ -7,7 +7,7 @@ bridge have been removed.
 
 ```text
 idb invocation
-  -> ida_codemode.client.DatabaseHandle
+  -> ida_codemode.DatabaseHandle
   -> authenticated Code Mode HTTP/SSE
   -> registered IDA GUI or managed idalib worker
   -> execute_python
@@ -35,9 +35,8 @@ instead of having auto-analysis force-enabled under the analyst.
 
 `idb close [--no-save]` shuts a managed worker down through Code Mode's
 `shutdown_database`, so unsaved changes can be discarded without killing the
-process. `attach`, `poll_autoanalysis`, and `shutdown_database` are not yet
-in a PyPI release; pyproject pins ida-codemode to the `api-changes` git
-branch until they ship.
+process. Exact attachment, non-mutating analysis polling, and managed shutdown
+require ida-codemode 0.5.3 or later.
 
 Code Mode's JSON wire has no bytes type (its fallback serializer produces
 repr() strings), so remote envelopes are passed through

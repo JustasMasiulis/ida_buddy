@@ -75,14 +75,15 @@ def _check_ida_config():
 
 def _check_codemode_registry():
     try:
-        from ida_codemode.registry import REGISTRY_DIR, scan_instances
+        from ida_codemode import discover_databases, get_state_dir
 
-        instances = scan_instances(REGISTRY_DIR)
+        instances = discover_databases()
         ready = sum(item.state.value == "ready" for item in instances)
+        registry_dir = get_state_dir() / "instances"
         return (
             "code-mode",
             "OK",
-            f"{ready} ready / {len(instances)} registered in {REGISTRY_DIR}",
+            f"{ready} ready / {len(instances)} registered in {registry_dir}",
         )
     except Exception as exc:
         return ("code-mode", "ERROR", str(exc))
@@ -92,7 +93,7 @@ def run():
     """Return ``(rows, ok)`` where rows are ``(check, status, detail)``."""
     rows = [
         _check_python(),
-        _check_module("ida_codemode.client"),
+        _check_module("ida_codemode"),
         _check_idapro(),
         _check_ida_config(),
         _check_codemode_registry(),

@@ -57,7 +57,7 @@ def test_sessions_paginates_discovered_rows(monkeypatch, capsys):
 
 
 class FakeHandle:
-    entry = SimpleNamespace(
+    instance = SimpleNamespace(
         record_id="123-abcdef", backend="gui", port=123, pid=456
     )
 
@@ -90,7 +90,7 @@ class FakeHandle:
 
 def test_run_remote_uses_and_releases_one_database_handle(monkeypatch, capsys):
     handle = FakeHandle(protocol.build_ok({"data": []}))
-    handle.entry = SimpleNamespace(record_id="1-w", backend="idalib", port=1, pid=2)
+    handle.instance = SimpleNamespace(record_id="1-w", backend="idalib", port=1, pid=2)
     monkeypatch.setattr(cli, "resolve_session", lambda ns: "/tmp/sample")
     monkeypatch.setattr(cli.codemode, "open_handle", lambda *a, **kw: handle)
 
@@ -369,7 +369,7 @@ def test_help_is_not_a_registered_subcommand():
 def test_close_shuts_down_and_discards(monkeypatch, capsys):
     entry = SimpleNamespace(record_id="9-w", backend="idalib", port=1, pid=2)
     handle = FakeHandle(protocol.build_ok({}))
-    handle.entry = entry
+    handle.instance = entry
     monkeypatch.setattr(cli, "resolve_session", lambda ns: entry)
     monkeypatch.setattr(cli.codemode, "open_handle", lambda *a, **kw: handle)
 
