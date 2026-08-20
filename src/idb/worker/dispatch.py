@@ -1,6 +1,6 @@
 """Remote handler registry and in-process invocation.
 
-Code Mode handles authentication, JSON framing, request limits, and serialized
+Nexus handles authentication, JSON framing, request limits, and serialized
 main-thread execution. The dispatcher only validates handler arguments, creates
 undo points for mutations, and returns the compact idb result envelope.
 """

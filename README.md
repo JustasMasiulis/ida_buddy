@@ -1,6 +1,6 @@
 # idb — IDA Pro Buddy
 
-A windbg-flavored CLI for interacting with IDA that is optimized for agentic harnesses. Every command opens an official [IDA Code Mode](https://pypi.org/project/ida-codemode/) `DatabaseHandle`, performs one operation, and releases it. Registered GUI databases are preferred; Code Mode starts a managed idalib worker when an explicit `--idb` target needs one. Output remains compact to minimize token use.
+A windbg-flavored CLI for interacting with IDA that is optimized for agentic harnesses. Every command opens an official [IDA Nexus](https://pypi.org/project/ida-nexus/) `DatabaseHandle`, performs one operation, and releases it. Registered GUI databases are preferred; Nexus starts a managed idalib worker when an explicit `--idb` target needs one. Output remains compact to minimize token use.
 
 ```
 idb open foo.exe          # attach GUI or managed idalib, print a triage summary
@@ -16,18 +16,18 @@ idb dt GUID                # inspect a type
 
 ## Install
 
-This port requires IDA 9.4+, IDA Code Mode, and its optional GUI plugin. Code Mode owns idalib activation and database lifecycle.
+This port requires IDA 9.4+, IDA Nexus, and its optional GUI plugin. Nexus owns idalib activation and database lifecycle.
 
 ```powershell
-# Installs ida-codemode from PyPI with ida-buddy:
+# Installs ida-nexus from PyPI with ida-buddy:
 uv sync
 uv run idb doctor
 
 # Install the GUI plugin so already-open IDA databases are registered:
-hcli plugin install https://github.com/HexRaysSA/ida-codemode
+hcli plugin install ida-nexus
 ```
 
-For a packaged install, install `ida-codemode>=0.5.3` and `ida-buddy` in the same environment so the managed Code Mode worker is available.
+For a packaged install, install `ida-nexus>=0.7.0` and `ida-buddy` in the same environment so the managed Nexus worker is available.
 
 ## Commands
 
@@ -36,7 +36,7 @@ Aliases in parens. `[mut]` mutates the database (creates an undo point).
 | Command | Meaning |
 |---|---|
 | `open [--fresh] <path>` | attach to a registered GUI, or spawn managed idalib, then print summary |
-| `sessions` | list registered Code Mode databases |
+| `sessions` | list registered Nexus databases |
 | `close [record-id] [--all] [--no-save]` | shut down a managed worker; `--no-save` discards unsaved changes |
 | `save` / `doctor` | persist the selected database / diagnose setup |
 | `segments` | segments + rwx |
@@ -203,5 +203,5 @@ registered database · `4` ambiguous database · `5` not ready · `6` timeout.
 
 ```
 uv run pytest tests --ignore=tests/integration
-uv run pytest tests/integration # runs against a real Code Mode instance
+uv run pytest tests/integration # runs against a real Nexus instance
 ```

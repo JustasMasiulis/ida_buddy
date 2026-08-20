@@ -1,4 +1,4 @@
-"""Pure tests for budgets and the Code Mode remote dispatcher."""
+"""Pure tests for budgets and the Nexus remote dispatcher."""
 
 import pytest
 

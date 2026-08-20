@@ -19,7 +19,7 @@ name = "ida-buddy"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "ida-codemode" },
+    { name = "ida-nexus" },
 ]
 
 [package.optional-dependencies]
@@ -29,24 +29,10 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "ida-codemode", specifier = ">=0.5.3" },
+    { name = "ida-nexus", specifier = ">=0.7.0" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8" },
 ]
 provides-extras = ["test"]
-
-[[package]]
-name = "ida-codemode"
-version = "0.5.3"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "ida-domain" },
-    { name = "packaging" },
-    { name = "zeromcp" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/d9/ec/3bc72db3fb56240c003b84949c8255caa565190a4690acf3c348f5583638/ida_codemode-0.5.3.tar.gz", hash = "sha256:4cc61b512c0b885f4553b12cbab8a399cd736857ebf06211d25a6286700df05e", size = 187050, upload-time = "2026-08-13T13:40:55.077Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/d8/6c/2772157fd6672e7b450d2d86700cad711ba6a9b34b501c9e2a0006d37f00/ida_codemode-0.5.3-py3-none-any.whl", hash = "sha256:cecac232af1f4cac0c7c04e2849913776519678f464afb2ab283cb0a8b13108e", size = 101241, upload-time = "2026-08-13T13:40:56.01Z" },
-]
 
 [[package]]
 name = "ida-domain"
@@ -60,6 +46,20 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/80/34/be087d3ea1c3a6573e0660cb5b40f0c4ade9ae5772cf1c5d98d52472d28b/ida_domain-0.5.1.tar.gz", hash = "sha256:c49f2c417047d882e954f651b50a709a3f27903b33ba533b794aa54d6536d16f", size = 396413, upload-time = "2026-08-10T13:32:48.45Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/27/78/9c698d818b0fddc6648f703a0821edeeb65b18404b43f556d249c5446c96/ida_domain-0.5.1-py3-none-any.whl", hash = "sha256:bfbb17c7d0cb2ed7d3f21342e1c8787f9018d5c2a94cdfd29e06537dd026a06d", size = 201275, upload-time = "2026-08-10T13:32:46.955Z" },
+]
+
+[[package]]
+name = "ida-nexus"
+version = "0.7.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "ida-domain" },
+    { name = "packaging" },
+    { name = "zeromcp" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b6/93/2f87cbd64ffc45e181542f133ba8db101c9049155b5f015d9d318f32dcfb/ida_nexus-0.7.0.tar.gz", hash = "sha256:838698c6a2456d474da833b2f4955da9f1fca4a488c95a157539a3c663a919ba", size = 220190, upload-time = "2026-08-20T21:52:18.228Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a5/c2/58704fc74618c7867cf7542d3150a75a7678aae2fff7960fa8e5cc67d934/ida_nexus-0.7.0-py3-none-any.whl", hash = "sha256:a5006c7170a0a758a598b864d6fa248bf4eccbea848a30fc6a3eeeadf638d07a", size = 127656, upload-time = "2026-08-20T21:52:19.395Z" },
 ]
 
 [[package]]

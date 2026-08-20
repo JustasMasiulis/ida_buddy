@@ -24,9 +24,9 @@ def _request(argv):
     return cli.build_request(cli.normalize_namespace(ns))
 
 
-def test_resolve_session_delegates_to_codemode(monkeypatch):
+def test_resolve_session_delegates_to_nexus(monkeypatch):
     monkeypatch.setattr(
-        cli.codemode,
+        cli.nexus,
         "resolve_target",
         lambda *, session, idb: f"{session or idb or 'auto'}",
     )
@@ -47,7 +47,7 @@ def test_sessions_paginates_discovered_rows(monkeypatch, capsys):
         }
         for index, name in enumerate(("a", "b", "c"))
     ]
-    monkeypatch.setattr(cli.codemode, "list_databases", lambda: rows)
+    monkeypatch.setattr(cli.nexus, "list_databases", lambda: rows)
 
     assert cli.cmd_sessions(_ns(offset=1, count=1)) == 0
 
@@ -92,7 +92,7 @@ def test_run_remote_uses_and_releases_one_database_handle(monkeypatch, capsys):
     handle = FakeHandle(protocol.build_ok({"data": []}))
     handle.instance = SimpleNamespace(record_id="1-w", backend="idalib", port=1, pid=2)
     monkeypatch.setattr(cli, "resolve_session", lambda ns: "/tmp/sample")
-    monkeypatch.setattr(cli.codemode, "open_handle", lambda *a, **kw: handle)
+    monkeypatch.setattr(cli.nexus, "open_handle", lambda *a, **kw: handle)
 
     assert cli.run_remote(_ns(), "names", {}) == 0
 
@@ -106,7 +106,7 @@ def test_run_remote_never_waits_on_gui_analysis(monkeypatch, capsys):
     # NOT_READY instead.
     handle = FakeHandle(protocol.build_ok({"data": []}))
     monkeypatch.setattr(cli, "resolve_session", lambda ns: "/tmp/sample")
-    monkeypatch.setattr(cli.codemode, "open_handle", lambda *a, **kw: handle)
+    monkeypatch.setattr(cli.nexus, "open_handle", lambda *a, **kw: handle)
 
     assert cli.run_remote(_ns(), "names", {}) == 0
 
@@ -116,7 +116,7 @@ def test_run_remote_never_waits_on_gui_analysis(monkeypatch, capsys):
 def test_save_uses_official_database_handle(monkeypatch, capsys):
     handle = FakeHandle(protocol.build_ok({}))
     monkeypatch.setattr(cli, "resolve_session", lambda ns: "/tmp/sample")
-    monkeypatch.setattr(cli.codemode, "open_handle", lambda *a, **kw: handle)
+    monkeypatch.setattr(cli.nexus, "open_handle", lambda *a, **kw: handle)
 
     assert cli.run_remote(_ns(), "save", {}) == 0
 
@@ -371,7 +371,7 @@ def test_close_shuts_down_and_discards(monkeypatch, capsys):
     handle = FakeHandle(protocol.build_ok({}))
     handle.instance = entry
     monkeypatch.setattr(cli, "resolve_session", lambda ns: entry)
-    monkeypatch.setattr(cli.codemode, "open_handle", lambda *a, **kw: handle)
+    monkeypatch.setattr(cli.nexus, "open_handle", lambda *a, **kw: handle)
 
     ns = cli.build_parser().parse_args(["close", "--no-save"])
     cli.normalize_namespace(ns)

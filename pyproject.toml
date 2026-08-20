@@ -5,12 +5,12 @@ build-backend = "hatchling.build"
 [project]
 name = "ida-buddy"
 version = "0.1.0"
-description = "windbg-flavored CLI over the official IDA Code Mode RPC"
+description = "windbg-flavored CLI over the official IDA Nexus service"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "JustasMasiulis" }]
-dependencies = ["ida-codemode>=0.5.3"]
+dependencies = ["ida-nexus>=0.7.0"]
 
 [project.optional-dependencies]
 test = ["pytest>=8"]

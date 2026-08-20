@@ -16,8 +16,8 @@ SRC = ROOT / "src"
 
 def make_env(workspace):
     """Isolated env for idb subprocesses: private temp dirs and — via
-    IDA_CODEMODE_STATE_DIR — a private Code Mode registry, so tests neither see
-    the user's live instances nor leak test workers into their registry."""
+    IDA_NEXUS_STATE_DIR — a private Nexus registry, so tests neither see the
+    user's live instances nor leak test workers into their registry."""
     state = workspace / "state"
     tmp = workspace / "tmp"
     state.mkdir(parents=True, exist_ok=True)
@@ -25,7 +25,7 @@ def make_env(workspace):
     env = os.environ.copy()
     env["LOCALAPPDATA"] = str(state)
     env["XDG_STATE_HOME"] = str(state)
-    env["IDA_CODEMODE_STATE_DIR"] = str(state / "codemode")
+    env["IDA_NEXUS_STATE_DIR"] = str(state / "nexus")
     env["TEMP"] = str(tmp)
     env["TMP"] = str(tmp)
     old = env.get("PYTHONPATH")
@@ -82,7 +82,7 @@ def shutdown_workers(env):
 def kill_workers(env):
     """Backstop for wedged or leaked workers: read the registry records
     directly and terminate the PIDs."""
-    registry_dir = pathlib.Path(env["IDA_CODEMODE_STATE_DIR"]) / "instances"
+    registry_dir = pathlib.Path(env["IDA_NEXUS_STATE_DIR"]) / "instances"
     if not registry_dir.is_dir():
         return
     for record in registry_dir.glob("*.json"):

@@ -1,9 +1,9 @@
-"""Client-side adapter for the official IDA Code Mode RPC.
+"""Client-side adapter for the official IDA Nexus service.
 
-Code Mode executes in IDA's interpreter.  Both ends run on the same host, so we
-publish this installation's package parent on the remote ``sys.path`` and call a
-small IDA-side entry point.  This keeps the IDA plugin generic and lets GUI and
-managed idalib instances use exactly the same handler implementation.
+Nexus executes Python in IDA's interpreter. Both ends run on the same host, so
+we publish this installation's package parent on the remote ``sys.path`` and
+call a small IDA-side entry point. This keeps the IDA plugin generic and lets
+GUI and managed idalib instances use exactly the same handler implementation.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from idb.errors import AMBIGUOUS, NO_SESSION, IdbError
 _PACKAGE_PARENT = str(Path(__file__).resolve().parent.parent)
 
 # Keep spawned workers alive this long after the last handle closes (the
-# maximum ida-codemode allows) so IDA's in-memory undo history survives
+# maximum IDA Nexus allows) so IDA's in-memory undo history survives
 # between CLI invocations.  GUI instances ignore lease keepalive entirely.
 WORKER_LINGER = 3600.0
 
@@ -56,7 +56,7 @@ def _preamble(payload: dict[str, Any]) -> str:
 
 
 def initialize_code(warm: bool = True) -> str:
-    """Build Code Mode Python that initializes handlers and returns a summary."""
+    """Build Nexus Python that initializes handlers and returns a summary."""
     return _preamble({"warm": warm}) + (
         "from idb.worker.remote import initialize as _idb_initialize\n"
         "_idb_initialize(db, **_idb_request)"
@@ -64,7 +64,7 @@ def initialize_code(warm: bool = True) -> str:
 
 
 def execute_code(command: str, arguments: dict[str, Any] | None = None) -> str:
-    """Build Code Mode Python for one ida-buddy command."""
+    """Build Nexus Python for one ida-buddy command."""
     return _preamble({"command": command, "arguments": arguments or {}}) + (
         "from idb.worker.remote import execute as _idb_execute\n"
         "_idb_execute(db, **_idb_request)"
@@ -72,15 +72,15 @@ def execute_code(command: str, arguments: dict[str, Any] | None = None) -> str:
 
 
 def _entry_path(entry) -> str:
-    """Return a path that Code Mode can use to resolve a discovered instance."""
+    """Return a path that Nexus can use to resolve a discovered instance."""
     if entry.exe_path and Path(entry.exe_path).exists():
         return entry.exe_path
     return entry.idb_path
 
 
 def list_databases() -> list[dict[str, Any]]:
-    """Return Code Mode discovery rows in the compact CLI formatter shape."""
-    from ida_codemode import discover_databases
+    """Return Nexus discovery rows in the compact CLI formatter shape."""
+    from ida_nexus import discover_databases
 
     rows = []
     for discovered in discover_databases():
@@ -106,7 +106,7 @@ def _require_ready(row):
     if row["status"] != "ready":
         raise IdbError(
             protocol.NOT_READY,
-            f"Code Mode instance {row['id']} is unavailable: "
+            f"Nexus instance {row['id']} is unavailable: "
             f"{row.get('error') or row['status']}",
         )
     return row["_entry"]
@@ -114,8 +114,8 @@ def _require_ready(row):
 
 def resolve_target(*, session: str | None, idb: str | None):
     """Resolve CLI selection to the DatabaseInstance of a live instance, or to a
-    validated path for ``--idb``, which resolves through Code Mode and may
-    spawn a worker on demand."""
+    validated path for ``--idb``, which resolves through Nexus and may spawn a
+    worker on demand."""
     if session and idb:
         raise IdbError(protocol.BAD_ARGS, "pass either --session or --idb, not both")
     if idb:
@@ -125,7 +125,7 @@ def resolve_target(*, session: str | None, idb: str | None):
     if session:
         matches = [row for row in rows if row["id"] == session]
         if not matches:
-            raise IdbError(NO_SESSION, f"no registered Code Mode instance {session!r}")
+            raise IdbError(NO_SESSION, f"no registered Nexus instance {session!r}")
         return _require_ready(matches[0])
 
     ready = [row for row in rows if row["status"] == "ready"]
@@ -136,10 +136,10 @@ def resolve_target(*, session: str | None, idb: str | None):
                 + (f" ({row['error']})" if row.get("error") else "")
                 for row in rows
             )
-            raise IdbError(protocol.NOT_READY, f"no usable Code Mode database: {detail}")
+            raise IdbError(protocol.NOT_READY, f"no usable Nexus database: {detail}")
         raise IdbError(
             NO_SESSION,
-            "no registered Code Mode database; open one in IDA or run `idb open <path>`",
+            "no registered Nexus database; open one in IDA or run `idb open <path>`",
         )
     if len(ready) > 1:
         raise IdbError(
@@ -160,8 +160,8 @@ def validate_path(path: str) -> str:
 
 
 def registered_entries():
-    """Return currently ready Code Mode database instances."""
-    from ida_codemode import InstanceState, discover_databases
+    """Return currently ready Nexus database instances."""
+    from ida_nexus import InstanceState, discover_databases
 
     return [
         item.instance
@@ -172,7 +172,7 @@ def registered_entries():
 
 def find_registered(path: str):
     """Return the live instance owning a path, if any."""
-    from ida_codemode import find_database_owner
+    from ida_nexus import find_database_owner
 
     return find_database_owner(path)
 
@@ -185,10 +185,10 @@ def open_handle(selection, *, timeout: float, fresh: bool = False,
     worker.  A DatabaseInstance attaches to exactly that instance: no path
     re-resolution, no GUI preference, no chance of spawning a lookalike.
     """
-    from ida_codemode import (
-        CodeModeConnectionError,
+    from ida_nexus import (
         DatabaseHandle,
         DatabaseOpenOptions,
+        NexusConnectionError,
     )
 
     if isinstance(selection, str):
@@ -202,10 +202,10 @@ def open_handle(selection, *, timeout: float, fresh: bool = False,
         )
     try:
         return DatabaseHandle.attach(selection, keepalive=linger)
-    except CodeModeConnectionError as exc:
+    except NexusConnectionError as exc:
         raise IdbError(
             protocol.NOT_READY,
-            f"Code Mode instance {selection.record_id} refused a lease "
+            f"Nexus instance {selection.record_id} refused a lease "
             f"(it may have just exited): {exc}",
         ) from exc
 
@@ -213,7 +213,7 @@ def open_handle(selection, *, timeout: float, fresh: bool = False,
 def _transport_error(exc):
     code = protocol.TIMEOUT if "timed out" in str(exc).lower() else protocol.IDA_ERROR
     message = f"{type(exc).__name__}: {exc}"
-    # ida_codemode RemoteError carries the remote traceback/stdout/stderr of a
+    # ida_nexus.RemoteError carries the remote traceback/stdout/stderr of a
     # failed execute_python in .details — without it a handler crash inside IDA
     # is undiagnosable from the CLI.
     details = getattr(exc, "details", None)
@@ -244,8 +244,8 @@ def _await_analysis(handle, timeout):
 def session(selection, *, timeout: float, fresh: bool = False,
             linger: float = WORKER_LINGER, wait: bool = True):
     """Own one handle's whole lifecycle: open/attach, optionally await analysis,
-    translate ida_codemode exceptions to IdbError, and always close.  ``wait``
-    gates the analysis barrier — lifecycle ops like ``close`` pass ``wait=False``."""
+    translate ida_nexus exceptions to IdbError, and always close. ``wait`` gates
+    the analysis barrier; lifecycle ops like ``close`` pass ``wait=False``."""
     handle = None
     try:
         handle = open_handle(selection, timeout=timeout, fresh=fresh, linger=linger)
@@ -263,8 +263,8 @@ def session(selection, *, timeout: float, fresh: bool = False,
 
 def envelope_from_execution(execution: Any) -> dict[str, Any]:
     if not isinstance(execution, dict) or not isinstance(execution.get("result"), dict):
-        raise IdbError(protocol.INTERNAL, "Code Mode execution returned no idb envelope")
+        raise IdbError(protocol.INTERNAL, "Nexus execution returned no idb envelope")
     envelope = protocol.decode_bytes(execution["result"])
     if not isinstance(envelope.get("ok"), bool):
-        raise IdbError(protocol.INTERNAL, "Code Mode returned an invalid idb envelope")
+        raise IdbError(protocol.INTERNAL, "Nexus returned an invalid idb envelope")
     return envelope

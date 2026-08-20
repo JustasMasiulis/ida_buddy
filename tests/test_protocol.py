@@ -39,8 +39,8 @@ def test_native_values_are_not_coerced():
 
 
 def test_bytes_payload_survives_the_json_wire():
-    # Code Mode's serializer turns bytes into repr() strings; our envelope codec
-    # must round-trip every payload shape the handlers produce.
+    # Nexus accepts JSON-compatible values only; our envelope codec must
+    # round-trip every payload shape the handlers produce.
     payload = {
         "bytes": bytes(range(256)),
         "rows": [{"raw": b"\x00\x01"}, {"raw": bytearray(b"\x02")}],

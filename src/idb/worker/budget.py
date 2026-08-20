@@ -1,7 +1,7 @@
 """Cooperative deadline for PURE-PYTHON worker loops (paginated line generation,
 immediate/byte search iteration). It CANNOT interrupt a single in-flight native
-call (decompile, a whole-range find_bytes, auto_wait) — Code Mode applies the
-outer operation timeout and cancellation. No ida_* imports."""
+call (decompile, a whole-range find_bytes, auto_wait) — Nexus applies the outer
+operation timeout and cancellation. No ida_* imports."""
 
 import time
 

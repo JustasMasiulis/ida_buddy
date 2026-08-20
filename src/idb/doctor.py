@@ -1,4 +1,4 @@
-"""Environment probe for the direct Code Mode CLI.
+"""Environment probe for the direct IDA Nexus CLI.
 
 Verifies what idb actually needs WITHOUT importing ida_* into the CLI process:
 spawning a managed worker requires the idapro package and an activated idalib
@@ -37,7 +37,7 @@ def _check_python():
 
 def _check_module(name):
     if _find_spec(name) is None:
-        return (name, "MISSING", "install ida-codemode")
+        return (name, "MISSING", "install ida-nexus")
     try:
         importlib.import_module(name)
         return (name, "OK", "installed")
@@ -73,30 +73,30 @@ def _check_ida_config():
         return ("ida-config", "ERROR", str(exc))
 
 
-def _check_codemode_registry():
+def _check_nexus_registry():
     try:
-        from ida_codemode import discover_databases, get_state_dir
+        from ida_nexus import discover_databases, get_state_dir
 
         instances = discover_databases()
         ready = sum(item.state.value == "ready" for item in instances)
         registry_dir = get_state_dir() / "instances"
         return (
-            "code-mode",
+            "nexus",
             "OK",
             f"{ready} ready / {len(instances)} registered in {registry_dir}",
         )
     except Exception as exc:
-        return ("code-mode", "ERROR", str(exc))
+        return ("nexus", "ERROR", str(exc))
 
 
 def run():
     """Return ``(rows, ok)`` where rows are ``(check, status, detail)``."""
     rows = [
         _check_python(),
-        _check_module("ida_codemode"),
+        _check_module("ida_nexus"),
         _check_idapro(),
         _check_ida_config(),
-        _check_codemode_registry(),
+        _check_nexus_registry(),
     ]
     ok = all(status not in {"MISSING", "ERROR"} for _, status, _ in rows)
     return rows, ok

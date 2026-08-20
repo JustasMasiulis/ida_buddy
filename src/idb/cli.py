@@ -1,7 +1,7 @@
-"""idb command-line front end over official IDA Code Mode handles.
+"""idb command-line front end over official IDA Nexus handles.
 
-Every invocation discovers or opens a registered database, performs one Code
-Mode operation, and releases its handle. No idb daemon or cross-process lease is
+Every invocation discovers or opens a registered database, performs one Nexus
+operation, and releases its handle. No idb daemon or cross-process lease is
 retained.
 
 Windbg-flavored aliases (u, dec, db/dw/dd/dq, da/du, x, ln, dt) are
@@ -13,7 +13,7 @@ different widths).
 import argparse
 import sys
 
-from idb import __version__, codemode, protocol
+from idb import __version__, nexus, protocol
 from idb import doctor as doctor_mod
 from idb.errors import IdbError, exit_code_for, AMBIGUOUS, NO_SESSION
 from idb.fmt import (
@@ -170,7 +170,7 @@ def _add_flags(sp, name):
 
 _ROOT_DESCRIPTION = (
     "IDA Pro Buddy - drive a registered IDA GUI or managed idalib session from the shell. "
-    "Each call opens an official Code Mode DatabaseHandle, performs one operation, and releases "
+    "Each call opens an official Nexus DatabaseHandle, performs one operation, and releases "
     "it. Use --idb <path> to spawn/target idalib explicitly; when exactly one registered "
     "database is live it is selected automatically. "
     "WinDbg-style aliases "
@@ -211,7 +211,7 @@ def build_parser():
     sp.add_argument("--fresh", action="store_true",
                     help="create a new IDB from the input (refuses a live owner)")
 
-    cmd("sessions", help="list registered Code Mode databases", ex=("sessions",))
+    cmd("sessions", help="list registered Nexus databases", ex=("sessions",))
     cmd("save", help="persist the .i64 now", ex=("save --idb foo.exe",))
     sp = cmd("close", help="shut down a managed idalib worker (GUI databases close in IDA)",
              ex=("close", "close --no-save", "close --all"))
@@ -514,7 +514,7 @@ def build_request(ns):
 def resolve_session(ns):
     """Resolve -s/--idb/default selection to a live instance DatabaseInstance."""
     try:
-        return codemode.resolve_target(session=ns.session, idb=ns.idb)
+        return nexus.resolve_target(session=ns.session, idb=ns.idb)
     except IdbError as exc:
         if exc.code == AMBIGUOUS and isinstance(exc.data, list):
             print(fmt_sessions.format_sessions(exc.data), file=sys.stderr)
@@ -552,31 +552,31 @@ def emit(rpc_cmd, reply, ns):
 
 def run_remote(ns, rpc_cmd, rpc_args):
     entry = resolve_session(ns)
-    open_timeout = ns.timeout if ns.timeout else codemode.OPEN_TIMEOUT
+    open_timeout = ns.timeout if ns.timeout else nexus.OPEN_TIMEOUT
     execute_timeout = ns.timeout if ns.timeout else DEFAULT_TIMEOUT
-    with codemode.session(entry, timeout=open_timeout) as handle:
+    with nexus.session(entry, timeout=open_timeout) as handle:
         if rpc_cmd == "save":
             saved = handle.save_database()
             reply = protocol.build_ok({"saved": saved["idb_path"]})
         else:
             execution = handle.execute_python(
-                codemode.execute_code(rpc_cmd, rpc_args),
+                nexus.execute_code(rpc_cmd, rpc_args),
                 timeout=execute_timeout,
             )
-            reply = codemode.envelope_from_execution(execution)
+            reply = nexus.envelope_from_execution(execution)
     return emit(rpc_cmd, reply, ns)
 
 
 def cmd_open(ns):
-    timeout = ns.timeout if ns.timeout else codemode.OPEN_TIMEOUT
-    target = codemode.validate_path(ns.target)
-    with codemode.session(target, timeout=timeout, fresh=ns.fresh) as handle:
+    timeout = ns.timeout if ns.timeout else nexus.OPEN_TIMEOUT
+    target = nexus.validate_path(ns.target)
+    with nexus.session(target, timeout=timeout, fresh=ns.fresh) as handle:
         gui = handle.instance.backend == "gui"
         execution = handle.execute_python(
-            codemode.initialize_code(warm=not gui),
+            nexus.initialize_code(warm=not gui),
             timeout=timeout,
         )
-        reply = codemode.envelope_from_execution(execution)
+        reply = nexus.envelope_from_execution(execution)
         if ns.verbose:
             entry = handle.instance
             print(
@@ -596,7 +596,7 @@ def _emit_paginated(rows, formatter, ns):
 
 
 def cmd_sessions(ns):
-    rows = codemode.list_databases()
+    rows = nexus.list_databases()
     for row in rows:
         row.pop("_entry", None)
     _emit_paginated(rows, fmt_sessions.format_sessions, ns)
@@ -607,12 +607,12 @@ def _close_targets(ns):
     if ns.all:
         if ns.session or ns.idb:
             raise IdbError(protocol.BAD_ARGS, "close takes a target or --all, not both")
-        return [entry for entry in codemode.registered_entries()
+        return [entry for entry in nexus.registered_entries()
                 if entry.backend != "gui"]
     if ns.idb:
         if ns.session:
             raise IdbError(protocol.BAD_ARGS, "pass either --session or --idb, not both")
-        entry = codemode.find_registered(ns.idb)
+        entry = nexus.find_registered(ns.idb)
         if entry is None:
             raise IdbError(NO_SESSION, f"no registered database for {ns.idb!r}")
         return [entry]
@@ -635,7 +635,7 @@ def cmd_close(ns):
         if entry.backend == "gui":
             raise IdbError(protocol.BAD_ARGS,
                            f"{entry.record_id} is a GUI instance; close it in IDA itself")
-        with codemode.session(entry, timeout=30.0, linger=0.0, wait=False) as handle:
+        with nexus.session(entry, timeout=30.0, linger=0.0, wait=False) as handle:
             handle.shutdown_database(save=save)
         print(f"closed {entry.record_id} ({'saved' if save else 'changes discarded'})",
               file=sys.stderr)

@@ -1,9 +1,9 @@
 """Small result-envelope contract shared by the CLI and remote handlers.
 
-Code Mode owns transport framing and authentication, but its wire is JSON and
-its fallback serializer destroys ``bytes`` (repr() strings). encode_bytes /
-decode_bytes preserve the old msgpack contract — only payloads are ``bytes``,
-and they round-trip — by tagging them as ``{"$idb.b64": <base64>}`` dicts.
+Nexus owns transport framing and authentication, but its wire accepts only
+JSON-compatible values. encode_bytes / decode_bytes preserve the old msgpack
+contract — payloads may be ``bytes`` and round-trip — by tagging them as
+``{"$idb.b64": <base64>}`` dicts.
 """
 
 import base64

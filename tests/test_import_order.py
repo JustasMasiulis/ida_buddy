@@ -1,4 +1,4 @@
-"""Local Code Mode client modules must never initialize IDA."""
+"""Local Nexus client modules must never initialize IDA."""
 
 import os
 import pathlib
@@ -10,7 +10,7 @@ _SRC = pathlib.Path(__file__).resolve().parent.parent / "src"
 _CODE = r"""
 import sys
 import idb.cli
-import idb.codemode
+import idb.nexus
 import idb.worker.remote
 bad = sorted(
     name for name in sys.modules

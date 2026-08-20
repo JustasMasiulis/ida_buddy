@@ -1,9 +1,9 @@
-"""Tier-4 smoke tests through one direct Code Mode DatabaseHandle.
+"""Tier-4 smoke tests through one direct Nexus DatabaseHandle.
 
 Gated on IDA being available and a test binary existing. The module retains one
 handle only to avoid reopening IDA between dozens of integration assertions.
 The binary is analyzed as a private copy so the worker's autosave never writes
-an .i64 into the repo fixtures, and IDA_CODEMODE_STATE_DIR points the worker
+an .i64 into the repo fixtures, and IDA_NEXUS_STATE_DIR points the worker
 registry at the workspace so the user's real registry stays untouched.
 """
 
@@ -19,12 +19,12 @@ _WORKSPACE = (
     pathlib.Path(__file__).resolve().parents[2]
     / ".tmp" / "idb-smoke-it" / f"{os.getpid()}-{uuid.uuid4().hex}"
 )
-# ida_codemode computes its state/registry paths at import time; this must be
-# set before anything imports it (idb.codemode imports it lazily).
-os.environ["IDA_CODEMODE_STATE_DIR"] = str(_WORKSPACE / "codemode")
+# ida_nexus computes its state/registry paths at import time; this must be set
+# before anything imports it (idb.nexus imports it lazily).
+os.environ["IDA_NEXUS_STATE_DIR"] = str(_WORKSPACE / "nexus")
 
 from _helpers import kill_pid, remove_workspace
-from idb import codemode, protocol
+from idb import nexus, protocol
 
 BINARY = os.environ.get(
     "IDB_TEST_BINARY",
@@ -39,10 +39,10 @@ class DirectClient:
         self.handle = handle
         self.instance = handle.instance
         execution = handle.execute_python(
-            codemode.initialize_code(),
+            nexus.initialize_code(),
             timeout=300,
         )
-        envelope = codemode.envelope_from_execution(execution)
+        envelope = nexus.envelope_from_execution(execution)
         assert protocol.is_ok(envelope), envelope
         self.summary = envelope["result"]
 
@@ -51,10 +51,10 @@ class DirectClient:
             result = self.handle.save_database()
             return protocol.build_ok({"saved": result["idb_path"]})
         execution = self.handle.execute_python(
-            codemode.execute_code(command, arguments or {}),
+            nexus.execute_code(command, arguments or {}),
             timeout=timeout_ms / 1000,
         )
-        return codemode.envelope_from_execution(execution)
+        return nexus.envelope_from_execution(execution)
 
     def close(self):
         self.handle.close()
@@ -66,7 +66,7 @@ def client():
     inputs.mkdir(parents=True, exist_ok=True)
     target = str(inputs / pathlib.Path(BINARY).name)
     shutil.copy2(BINARY, target)
-    handle = codemode.open_handle(target, timeout=300)
+    handle = nexus.open_handle(target, timeout=300)
     try:
         handle.wait_autoanalysis(300)
         yield DirectClient(handle)
