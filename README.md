@@ -1,9 +1,9 @@
 # idb — IDA Pro Buddy
 
-A windbg-flavored CLI for interacting with IDA that is optimized for agentic harnesses. `idb` maintains a persistent headless worker per database and tries to minimize token use with compact text output.
+A windbg-flavored CLI for interacting with IDA that is optimized for agentic harnesses. Every command opens an official [IDA Nexus](https://pypi.org/project/ida-nexus/) `DatabaseHandle`, performs one operation, and releases it. Registered GUI databases are preferred; Nexus starts a managed idalib worker when an explicit `--idb` target needs one. Output remains compact to minimize token use.
 
 ```
-idb open foo.exe          # spawn + analyze, print a triage summary
+idb open foo.exe          # attach GUI or managed idalib, print a triage summary
 idb u sub_401000          # disassemble a function (windbg alias for `disas`)
 idb dec sub_401000        # decompile (Hex-Rays)
 idb db 0x401000 -n 64     # hexdump 64 bytes
@@ -12,21 +12,22 @@ idb xref_to validate_key  # who references this, with instruction context
 idb triage sub_401000     # size up a function before reading it
 idb ? sub_401000 + 0x10   # evaluate an expression (alias for `eval`)
 idb dt GUID                # inspect a type
-idb close                 # save + shut the worker down
 ```
 
 ## Install
 
-This tool requires IDA Pro to be installed and activated globally.
+This port requires IDA 9.4+, IDA Nexus, and its optional GUI plugin. Nexus owns idalib activation and database lifecycle.
 
 ```powershell
-# 1. Activate idalib so idapro can locate your IDA install (writes ida-config.json):
-python "C:\Program Files\IDA Professional 9.3\idalib\python\py-activate-idalib.py"
-# 2. Install idb (pulls idapro + pyzmq + msgspec from PyPI):
-python -m pip install -e D:\ida_buddy
-# 3. Verify the environment:
-idb doctor
+# Installs ida-nexus from PyPI with ida-buddy:
+uv sync
+uv run idb doctor
+
+# Install the GUI plugin so already-open IDA databases are registered:
+hcli plugin install ida-nexus
 ```
+
+For a packaged install, install `ida-nexus>=0.7.0` and `ida-buddy` in the same environment so the managed Nexus worker is available.
 
 ## Commands
 
@@ -34,9 +35,10 @@ Aliases in parens. `[mut]` mutates the database (creates an undo point).
 
 | Command | Meaning |
 |---|---|
-| `open [--fresh] <path>` | spawn + analyze, print summary |
-| `sessions` | list running workers |
-| `close [session] [--no-save\|--kill\|--all]` / `save` / `doctor` | lifecycle |
+| `open [--fresh] <path>` | attach to a registered GUI, or spawn managed idalib, then print summary |
+| `sessions` | list registered Nexus databases |
+| `close [record-id] [--all] [--no-save]` | shut down a managed worker; `--no-save` discards unsaved changes |
+| `save` / `doctor` | persist the selected database / diagnose setup |
 | `segments` | segments + rwx |
 | `funcs [pat]` / `names <pat>` (`x`) / `nearest <addr>` (`ln`) | symbols |
 | `eval <expr>` (`?`) | arithmetic/bitwise calc + name lookup; `+%`/`-%`/`*%` wrap (`-w` width); result as hex / `0n`-dec (signed+unsigned) / ascii |
@@ -70,34 +72,39 @@ Aliases in parens. `[mut]` mutates the database (creates an undo point).
 | `undo` / `redo` *(mut)* | revert / replay the last mutation |
 
 
-## Sessions
+## Database targeting
 
-`idb open` starts or reuses one persistent worker per input path. Commands target
-the only running worker by default. Once two or more workers are live, pass a
-session id or database/binary path on every command:
+There is no idb daemon or retained cross-process CLI session. Each invocation
+uses one `DatabaseHandle` and closes it before exiting.
+
+With exactly one registered GUI/idalib database, commands select it
+automatically. Otherwise target a live record from `idb sessions` with `-s`, or
+pass a stable executable/IDB path with `--idb`:
 
 ```
 idb sessions
-idb -s foo.exe-1a2b3c4d funcs main
+idb -s 12345-a1b2c3 funcs main
 idb --idb C:\bins\foo.exe dec main
-idb close foo.exe-1a2b3c4d
-idb close --all --no-save
+idb --idb C:\bins\foo.exe save
 ```
 
-If a command fails with `AMBIGUOUS`, rerun it with `-s <session>` from
-`idb sessions` or `--idb <path>`. `open --fresh <path>` refuses to clobber a live
-worker for that database; close the session first when you want a clean reanalysis.
+`--idb` can start a managed idalib worker on demand. After the command releases
+its handle the worker lingers for up to an hour, so undo history survives
+between invocations (`idb undo` reverts a bad mutation); it saves and closes
+when the linger expires. GUI databases are never closed by the CLI.
+`open --fresh` creates a new IDB and refuses to run while a live instance owns
+the target.
 
 ## Examples
 
 ```powershell
-# Lifecycle and session targeting
+# Discovery and targeting
 idb doctor
+idb sessions
 idb open C:\bins\foo.exe
 idb open foo.exe --fresh
-idb sessions
-idb -s foo.exe-1a2b3c4d save
-idb close foo.exe-1a2b3c4d
+idb --idb C:\bins\foo.exe save
+idb close --no-save          # discard a bad session instead of persisting it
 
 # Database overview and symbols
 idb segments --total
@@ -190,11 +197,11 @@ and focused `disas` windows to inspect only the code that still matters.
 ### Exit codes
 
 `0` ok · `1` error (IDA/not-found/bad-address/internal) · `2` usage · `3` no
-session · `4` ambiguous session · `5` not ready · `6` timeout · `7` unauthorized.
+registered database · `4` ambiguous database · `5` not ready · `6` timeout.
 
 ## Testing
 
 ```
-python -m pytest tests --ignore=tests/integration
-python -m pytest tests/integration # runs against a real binary
+uv run pytest tests --ignore=tests/integration
+uv run pytest tests/integration # runs against a real Nexus instance
 ```

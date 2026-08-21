@@ -1,57 +1,70 @@
 from idb import protocol
 
 
-def _roundtrip(obj):
-    return protocol.decode(protocol.encode(obj))
-
-
-def test_request_roundtrip_and_version():
-    req = protocol.build_request(7, "deadbeef", "read", {"addr": 0x401000, "n": 16})
-    out = _roundtrip(req)
-    assert out == req
-    assert out["v"] == protocol.PROTOCOL_VERSION
-    assert out["id"] == 7
-    assert out["cmd"] == "read"
-
-
 def test_ok_and_error_shapes():
-    ok = protocol.build_ok(1, {"x": 1}, meta={"truncated": True, "next_offset": 50})
-    out = _roundtrip(ok)
-    assert out["ok"] is True
-    assert out["result"] == {"x": 1}
-    assert out["meta"]["next_offset"] == 50
+    ok = protocol.build_ok(
+        {"x": 1},
+        meta={"truncated": True, "next_offset": 50},
+    )
+    assert ok["ok"] is True
+    assert ok["result"] == {"x": 1}
+    assert ok["meta"]["next_offset"] == 50
 
-    err = protocol.build_error(2, protocol.BAD_ADDRESS, "nope", data={"addr": 0})
-    out = _roundtrip(err)
-    assert out["ok"] is False
-    assert out["error"]["code"] == "BAD_ADDRESS"
-    assert out["error"]["message"] == "nope"
-    assert out["error"]["data"] == {"addr": 0}
-    assert protocol.is_ok(ok) and not protocol.is_ok(err)
-
-
-def test_no_meta_no_data_keys_when_absent():
-    assert "meta" not in protocol.build_ok(1, 5)
-    assert "data" not in protocol.build_error(1, protocol.INTERNAL, "boom")
-
-
-def test_bytes_payload_survives_as_bytes():
-    blob = bytes(range(256))
-    out = _roundtrip(protocol.build_ok(1, {"bytes": blob, "text": "hello"}))
-    assert out["result"]["bytes"] == blob
-    assert isinstance(out["result"]["bytes"], bytes)
-    assert isinstance(out["result"]["text"], str)
+    error = protocol.build_error(
+        protocol.BAD_ADDRESS,
+        "nope",
+        data={"addr": 0},
+    )
+    assert error["ok"] is False
+    assert error["error"] == {
+        "code": "BAD_ADDRESS",
+        "message": "nope",
+        "data": {"addr": 0},
+    }
+    assert protocol.is_ok(ok) and not protocol.is_ok(error)
 
 
-def test_64bit_ints_preserved():
-    for value in (0, 0x401000, 0x7FFF_FFFF_FFFF, 0xFFFF_FFFF_FFFF_FFFF):
-        out = _roundtrip(protocol.build_ok(1, {"ea": value}))
-        assert out["result"]["ea"] == value
+def test_optional_keys_are_absent():
+    assert "meta" not in protocol.build_ok(5)
+    assert "data" not in protocol.build_error(protocol.INTERNAL, "boom").get(
+        "error", {}
+    )
 
 
-def test_decoded_keys_are_str():
-    req = protocol.build_request(1, "t", "x", {"nested": {"a": 1}})
-    out = _roundtrip(req)
-    assert all(isinstance(k, str) for k in out)
-    assert all(isinstance(k, str) for k in out["args"])
-    assert all(isinstance(k, str) for k in out["args"]["nested"])
+def test_native_values_are_not_coerced():
+    blob = bytes(range(16))
+    result = protocol.build_ok({"bytes": blob, "ea": 0xFFFF_FFFF_FFFF_FFFF})
+    assert result["result"]["bytes"] is blob
+    assert result["result"]["ea"] == 0xFFFF_FFFF_FFFF_FFFF
+
+
+def test_bytes_payload_survives_the_json_wire():
+    # Nexus accepts JSON-compatible values only; our envelope codec must
+    # round-trip every payload shape the handlers produce.
+    payload = {
+        "bytes": bytes(range(256)),
+        "rows": [{"raw": b"\x00\x01"}, {"raw": bytearray(b"\x02")}],
+        "view": memoryview(b"mv"),
+        "text": "unchanged",
+        "ea": 0xFFFF_FFFF,
+    }
+    wire = protocol.encode_bytes(payload)
+    import json
+
+    json.dumps(wire)  # the encoded form must be JSON-safe
+
+    out = protocol.decode_bytes(wire)
+    assert out["bytes"] == bytes(range(256))
+    assert out["rows"][0]["raw"] == b"\x00\x01"
+    assert out["rows"][1]["raw"] == b"\x02"
+    assert out["view"] == b"mv"
+    assert out["text"] == "unchanged"
+    assert out["ea"] == 0xFFFF_FFFF
+
+
+def test_bytes_tag_requires_exact_shape():
+    # The tag key is reserved, but only an exact {tag: str} dict decodes;
+    # anything wider passes through untouched.
+    not_a_tag = {"$idb.b64": "aGk=", "extra": 1}
+    assert protocol.decode_bytes(not_a_tag) == not_a_tag
+    assert protocol.decode_bytes({"$idb.b64": 5}) == {"$idb.b64": 5}

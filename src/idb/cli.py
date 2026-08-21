@@ -1,5 +1,8 @@
-"""idb command-line front end. Imports NO ida_* / idapro — it resolves a session
-from the registry files and does one RPC round-trip per invocation.
+"""idb command-line front end over official IDA Nexus handles.
+
+Every invocation discovers or opens a registered database, performs one Nexus
+operation, and releases its handle. No idb daemon or cross-process lease is
+retained.
 
 Windbg-flavored aliases (u, dec, db/dw/dd/dq, da/du, x, ln, dt) are
 accepted by argparse, then canonicalized through the ALIASES table so aliases
@@ -10,10 +13,9 @@ different widths).
 import argparse
 import sys
 
-from idb import __version__, protocol, registry, spawn
+from idb import __version__, nexus, protocol
 from idb import doctor as doctor_mod
-from idb.errors import IdbError, exit_code_for, NO_SESSION, AMBIGUOUS
-from idb.transport import ZmqClient
+from idb.errors import IdbError, exit_code_for, AMBIGUOUS, NO_SESSION
 from idb.fmt import (
     listing,
     disasm as fmt_disasm,
@@ -101,8 +103,6 @@ FORMATTERS = {
     "union_select": fmt_writes.format_union_select,
 }
 
-_LIVE = (registry.STATUS_READY, registry.STATUS_BUSY, registry.STATUS_ANALYZING)
-
 _GLOBAL_DEFAULTS = {
     "session": None,
     "idb": None,
@@ -139,7 +139,7 @@ def _session_flags():
     g.add_argument("-s", "--session", default=argparse.SUPPRESS,
                    help="session id (see `idb sessions`)")
     g.add_argument("--idb", default=argparse.SUPPRESS,
-                   help="resolve the session by database/binary path")
+                   help="database/binary path; spawns a managed worker on demand")
     g.add_argument("-t", "--timeout", type=float, default=argparse.SUPPRESS,
                    help="client wait, seconds")
     g.add_argument("-v", "--verbose", action="count", default=argparse.SUPPRESS,
@@ -169,9 +169,10 @@ def _add_flags(sp, name):
                          if name in _TOTAL_CMDS else argparse.SUPPRESS)
 
 _ROOT_DESCRIPTION = (
-    "IDA Pro Buddy - drive a headless IDA session from the shell. Each call resolves a worker "
-    "and does one RPC round-trip; open a database first with `idb open <file>`, then target it "
-    "with -s/--idb (when only one session is live, it is used; with 2+ you must disambiguate). "
+    "IDA Pro Buddy - drive a registered IDA GUI or managed idalib session from the shell. "
+    "Each call opens an official Nexus DatabaseHandle, performs one operation, and releases "
+    "it. Use --idb <path> to spawn/target idalib explicitly; when exactly one registered "
+    "database is live it is selected automatically. "
     "WinDbg-style aliases "
     "(u, dec, db/dw/dd/dq, da/du, x, ln, dt, s) are recommended."
 )
@@ -204,20 +205,21 @@ def build_parser():
         _add_flags(sp, name)
         return sp
 
-    sp = cmd("open", help="spawn+analyze a binary/db and print a summary",
+    sp = cmd("open", help="attach to a registered GUI or managed idalib database",
              ex=(r"open C:\bins\foo.exe", "open foo.exe --fresh"))
     sp.add_argument("target")
-    sp.add_argument("--fresh", action="store_true", help="re-analyze from the binary")
+    sp.add_argument("--fresh", action="store_true",
+                    help="create a new IDB from the input (refuses a live owner)")
 
-    cmd("sessions", help="list workers", ex=("sessions",))
-    sp = cmd("close", help="shut a worker down",
-             ex=("close", "close foo.exe-1a2b3c4d", "close --all --no-save"))
-    sp.add_argument("session_pos", nargs="?", default=None, metavar="session",
-                    help="session id to close (alternative to -s)")
-    sp.add_argument("--no-save", dest="no_save", action="store_true")
-    sp.add_argument("--kill", action="store_true", help="TerminateProcess (wedged worker)")
-    sp.add_argument("--all", action="store_true")
-    cmd("save", help="persist the .i64 now", ex=("save",))
+    cmd("sessions", help="list registered Nexus databases", ex=("sessions",))
+    cmd("save", help="persist the .i64 now", ex=("save --idb foo.exe",))
+    sp = cmd("close", help="shut down a managed idalib worker (GUI databases close in IDA)",
+             ex=("close", "close --no-save", "close --all"))
+    sp.add_argument("session_pos", nargs="?", default=None, metavar="record-id",
+                    help="record id (same as -s)")
+    sp.add_argument("--all", action="store_true", help="close every managed worker")
+    sp.add_argument("--no-save", dest="no_save", action="store_true",
+                    help="discard unsaved changes instead of persisting them")
     cmd("doctor", help="probe the environment", ex=("doctor",))
 
     cmd("segments", help="segments + rwx", ex=("segments --total",))
@@ -510,29 +512,14 @@ def build_request(ns):
 
 
 def resolve_session(ns):
-    registry.cleanup_stale()
-    entries = registry.list_all()
-    if ns.session:
-        matched = registry.match(entries, session=ns.session)
-        if not matched:
-            raise IdbError(NO_SESSION, f"no session named {ns.session!r}")
-        return matched[0]
-    if ns.idb:
-        matched = registry.match(entries, idb=ns.idb)
-        if not matched:
-            raise IdbError(NO_SESSION, f"no session for {ns.idb!r}")
-        if len(matched) > 1:
-            print(fmt_sessions.format_sessions(matched), file=sys.stderr)
-            raise IdbError(AMBIGUOUS, f"{len(matched)} sessions match {ns.idb!r}; use -s")
-        return matched[0]
-    live = [e for e in entries if registry.probe(e) in _LIVE]
-    if not live:
-        raise IdbError(NO_SESSION, "no running sessions; run `idb open <binary>` first")
-    if len(live) == 1:
-        return live[0]
-    print(fmt_sessions.format_sessions([{**e, "status": registry.probe(e)} for e in live]),
-          file=sys.stderr)
-    raise IdbError(AMBIGUOUS, f"{len(live)} sessions; disambiguate with -s <id> or --idb <path>")
+    """Resolve -s/--idb/default selection to a live instance DatabaseInstance."""
+    try:
+        return nexus.resolve_target(session=ns.session, idb=ns.idb)
+    except IdbError as exc:
+        if exc.code == AMBIGUOUS and isinstance(exc.data, list):
+            print(fmt_sessions.format_sessions(exc.data), file=sys.stderr)
+            raise IdbError(exc.code, exc.message) from exc
+        raise
 
 
 def _banner(meta):
@@ -565,36 +552,39 @@ def emit(rpc_cmd, reply, ns):
 
 def run_remote(ns, rpc_cmd, rpc_args):
     entry = resolve_session(ns)
-    client = ZmqClient(entry["port"], entry["token"])
-    timeout = ns.timeout if ns.timeout else DEFAULT_TIMEOUT
-    try:
-        reply = client.call(rpc_cmd, rpc_args, timeout_ms=int(timeout * 1000))
-    except IdbError as exc:
-        # The REP loop is serial: a timeout usually means another (or a long)
-        # request is in flight, not a dead worker. Say so before someone
-        # reaches for `close --kill` on a healthy session.
-        if exc.code == protocol.TIMEOUT and registry.pid_alive(entry.get("pid")):
-            raise IdbError(
-                protocol.TIMEOUT,
-                f"{exc.message}; worker {entry['id']} is alive but busy "
-                "(likely serving a long request) — retry or raise -t",
-            ) from exc
-        raise
-    finally:
-        client.close()
+    open_timeout = ns.timeout if ns.timeout else nexus.OPEN_TIMEOUT
+    execute_timeout = ns.timeout if ns.timeout else DEFAULT_TIMEOUT
+    with nexus.session(entry, timeout=open_timeout) as handle:
+        if rpc_cmd == "save":
+            saved = handle.save_database()
+            reply = protocol.build_ok({"saved": saved["idb_path"]})
+        else:
+            execution = handle.execute_python(
+                nexus.execute_code(rpc_cmd, rpc_args),
+                timeout=execute_timeout,
+            )
+            reply = nexus.envelope_from_execution(execution)
     return emit(rpc_cmd, reply, ns)
 
 
 def cmd_open(ns):
-    entry, summary = spawn.open_or_reuse(
-        ns.target,
-        fresh=ns.fresh,
-        deadline_s=ns.timeout if ns.timeout else spawn.DEFAULT_OPEN_DEADLINE,
-    )
-    print(listing.format_open_summary(summary))
-    if ns.verbose:
-        print(f"session {entry['id']}  port {entry['port']}  pid {entry['pid']}", file=sys.stderr)
-    return 0
+    timeout = ns.timeout if ns.timeout else nexus.OPEN_TIMEOUT
+    target = nexus.validate_path(ns.target)
+    with nexus.session(target, timeout=timeout, fresh=ns.fresh) as handle:
+        gui = handle.instance.backend == "gui"
+        execution = handle.execute_python(
+            nexus.initialize_code(warm=not gui),
+            timeout=timeout,
+        )
+        reply = nexus.envelope_from_execution(execution)
+        if ns.verbose:
+            entry = handle.instance
+            print(
+                f"instance {entry.record_id}  backend {entry.backend}  "
+                f"port {entry.port}  pid {entry.pid}",
+                file=sys.stderr,
+            )
+    return emit("open_summary", reply, ns)
 
 
 def _emit_paginated(rows, formatter, ns):
@@ -606,41 +596,27 @@ def _emit_paginated(rows, formatter, ns):
 
 
 def cmd_sessions(ns):
-    registry.cleanup_stale()
-    rows = [{**e, "status": registry.probe(e) or "dead"} for e in registry.list_all()]
+    rows = nexus.list_databases()
+    for row in rows:
+        row.pop("_entry", None)
     _emit_paginated(rows, fmt_sessions.format_sessions, ns)
     return 0
 
 
-def _close_one(entry, kill, save, timeout_s=20.0):
-    import time
-
-    sid, pid = entry["id"], entry.get("pid")
-    if kill:
-        if not spawn.kill_pid(pid):
-            raise IdbError(protocol.IDA_ERROR, f"could not kill {sid} (pid {pid})")
-        registry.unregister(sid)
-        return f"killed {sid} (pid {pid})"
-    client = ZmqClient(entry["port"], entry["token"])
-    try:
-        client.call("shutdown", {"save": save}, timeout_ms=15000)
-    except IdbError:
-        if not spawn.kill_pid(pid):
-            raise IdbError(protocol.IDA_ERROR, f"{sid} unreachable; could not kill pid {pid}")
-        registry.unregister(sid)
-        return f"{sid} unreachable; killed"
-    finally:
-        client.close()
-    deadline = time.time() + timeout_s
-    while time.time() < deadline and registry.pid_alive(pid):
-        time.sleep(0.1)
-    if registry.pid_alive(pid):
-        # Still saving (large .i64). The entry must outlive the save so a
-        # concurrent `idb open` cannot spawn a second worker over it; the
-        # worker unregisters itself once close_database finishes.
-        return f"{sid} shutting down; still saving (pid {pid}); it will clear its session entry when done"
-    registry.unregister(sid)
-    return f"closed {sid} (save={save})"
+def _close_targets(ns):
+    if ns.all:
+        if ns.session or ns.idb:
+            raise IdbError(protocol.BAD_ARGS, "close takes a target or --all, not both")
+        return [entry for entry in nexus.registered_entries()
+                if entry.backend != "gui"]
+    if ns.idb:
+        if ns.session:
+            raise IdbError(protocol.BAD_ARGS, "pass either --session or --idb, not both")
+        entry = nexus.find_registered(ns.idb)
+        if entry is None:
+            raise IdbError(NO_SESSION, f"no registered database for {ns.idb!r}")
+        return [entry]
+    return [resolve_session(ns)]
 
 
 def cmd_close(ns):
@@ -648,19 +624,21 @@ def cmd_close(ns):
         if ns.session and ns.session != ns.session_pos:
             raise IdbError(protocol.BAD_ARGS,
                            f"close got -s {ns.session!r} and positional {ns.session_pos!r}; "
-                           "pass the session id once")
-        if ns.all:
-            raise IdbError(protocol.BAD_ARGS, "close takes a session id or --all, not both")
+                           "pass the record id once")
         ns.session = ns.session_pos
-    if ns.all:
-        targets = registry.list_all()
-        if not targets:
-            print("no sessions to close", file=sys.stderr)
-            return 0
-    else:
-        targets = [resolve_session(ns)]
-    for entry in targets:
-        print(_close_one(entry, kill=ns.kill, save=not ns.no_save), file=sys.stderr)
+    entries = _close_targets(ns)
+    if not entries:
+        print("no managed workers to close", file=sys.stderr)
+        return 0
+    save = not ns.no_save
+    for entry in entries:
+        if entry.backend == "gui":
+            raise IdbError(protocol.BAD_ARGS,
+                           f"{entry.record_id} is a GUI instance; close it in IDA itself")
+        with nexus.session(entry, timeout=30.0, linger=0.0, wait=False) as handle:
+            handle.shutdown_database(save=save)
+        print(f"closed {entry.record_id} ({'saved' if save else 'changes discarded'})",
+              file=sys.stderr)
     return 0
 
 

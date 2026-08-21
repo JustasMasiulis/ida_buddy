@@ -1,20 +1,30 @@
-"""Tier-4 smoke tests against a real headless IDA worker.
+"""Tier-4 smoke tests through one direct Nexus DatabaseHandle.
 
-Gated on idapro being importable and a test binary existing (IDB_TEST_BINARY, or
-the bundled tests/fixtures/where.exe). One warm worker is shared across the module
-in an isolated registry; each phase appends cases here.
+Gated on IDA being available and a test binary existing. The module retains one
+handle only to avoid reopening IDA between dozens of integration assertions.
+The binary is analyzed as a private copy so the worker's autosave never writes
+an .i64 into the repo fixtures, and IDA_NEXUS_STATE_DIR points the worker
+registry at the workspace so the user's real registry stays untouched.
 """
 
 import importlib.util
 import os
+import pathlib
 import shutil
-import tempfile
-import time
+import uuid
 
 import pytest
 
-from idb import protocol, spawn
-from idb.transport import ZmqClient
+_WORKSPACE = (
+    pathlib.Path(__file__).resolve().parents[2]
+    / ".tmp" / "idb-smoke-it" / f"{os.getpid()}-{uuid.uuid4().hex}"
+)
+# ida_nexus computes its state/registry paths at import time; this must be set
+# before anything imports it (idb.nexus imports it lazily).
+os.environ["IDA_NEXUS_STATE_DIR"] = str(_WORKSPACE / "nexus")
+
+from _helpers import kill_pid, remove_workspace
+from idb import nexus, protocol
 
 BINARY = os.environ.get(
     "IDB_TEST_BINARY",
@@ -24,36 +34,53 @@ _AVAILABLE = importlib.util.find_spec("idapro") is not None and os.path.exists(B
 pytestmark = pytest.mark.skipif(not _AVAILABLE, reason="needs idapro + a test binary")
 
 
+class DirectClient:
+    def __init__(self, handle):
+        self.handle = handle
+        self.instance = handle.instance
+        execution = handle.execute_python(
+            nexus.initialize_code(),
+            timeout=300,
+        )
+        envelope = nexus.envelope_from_execution(execution)
+        assert protocol.is_ok(envelope), envelope
+        self.summary = envelope["result"]
+
+    def call(self, command, arguments=None, timeout_ms=20000):
+        if command == "save":
+            result = self.handle.save_database()
+            return protocol.build_ok({"saved": result["idb_path"]})
+        execution = self.handle.execute_python(
+            nexus.execute_code(command, arguments or {}),
+            timeout=timeout_ms / 1000,
+        )
+        return nexus.envelope_from_execution(execution)
+
+    def close(self):
+        self.handle.close()
+
+
 @pytest.fixture(scope="module")
 def client():
-    tmp = tempfile.mkdtemp(prefix="idb-it-")
-    saved = {k: os.environ.get(k) for k in ("LOCALAPPDATA", "XDG_STATE_HOME")}
-    os.environ["LOCALAPPDATA"] = tmp
-    os.environ["XDG_STATE_HOME"] = tmp
-    entry = None
+    inputs = _WORKSPACE / "inputs"
+    inputs.mkdir(parents=True, exist_ok=True)
+    target = str(inputs / pathlib.Path(BINARY).name)
+    shutil.copy2(BINARY, target)
+    handle = nexus.open_handle(target, timeout=300)
     try:
-        entry, summary = spawn.open_or_reuse(BINARY, deadline_s=300)
-        conn = ZmqClient(entry["port"], entry["token"])
-        conn.summary = summary
-        conn.entry = entry
-        yield conn
-        conn.close()
+        handle.wait_autoanalysis(300)
+        yield DirectClient(handle)
     finally:
-        if entry is not None:
-            killer = ZmqClient(entry["port"], entry["token"])
-            try:
-                killer.call("shutdown", {"save": False}, timeout_ms=15000)
-            except Exception:
-                spawn.kill_pid(entry.get("pid"))
-            finally:
-                killer.close()
-            time.sleep(0.5)
-        for key, value in saved.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
-        shutil.rmtree(tmp, ignore_errors=True)
+        pid = handle.instance.pid
+        # Discard-shutdown: the worker must neither linger (WORKER_LINGER) nor
+        # autosave an .i64 for a throwaway workspace copy.
+        try:
+            handle.shutdown_database(save=False)
+        except Exception:
+            if pid:
+                kill_pid(pid)
+        handle.close()
+        remove_workspace(_WORKSPACE)
 
 
 def ok(conn, cmd, args=None, timeout_ms=20000):

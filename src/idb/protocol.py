@@ -1,17 +1,13 @@
-"""RPC envelope + msgpack codec shared by client and worker.
+"""Small result-envelope contract shared by the CLI and remote handlers.
 
-Contract: text fields are `str`, only payloads are `bytes`; dict keys are `str`.
-msgspec.msgpack gives us native 64-bit ints and round-trips `bytes` as msgpack
-bin. No ida_* imports here.
+Nexus owns transport framing and authentication, but its wire accepts only
+JSON-compatible values. encode_bytes / decode_bytes preserve the old msgpack
+contract — payloads may be ``bytes`` and round-trip — by tagging them as
+``{"$idb.b64": <base64>}`` dicts.
 """
 
-import msgspec
+import base64
 
-PROTOCOL_VERSION = 1
-
-BAD_REQUEST = "BAD_REQUEST"
-UNAUTHORIZED = "UNAUTHORIZED"
-UNKNOWN_CMD = "UNKNOWN_CMD"
 BAD_ARGS = "BAD_ARGS"
 BAD_ADDRESS = "BAD_ADDRESS"
 NOT_FOUND = "NOT_FOUND"
@@ -19,36 +15,78 @@ IDA_ERROR = "IDA_ERROR"
 NOT_READY = "NOT_READY"
 TIMEOUT = "TIMEOUT"
 INTERNAL = "INTERNAL"
+UNKNOWN_CMD = "UNKNOWN_CMD"
 
-_encoder = msgspec.msgpack.Encoder()
-_decoder = msgspec.msgpack.Decoder()
-
-
-def encode(obj) -> bytes:
-    return _encoder.encode(obj)
+_BYTES_TAG = "$idb.b64"
 
 
-def decode(buf):
-    return _decoder.decode(buf)
-
-
-def build_request(req_id, token, cmd, args=None):
-    return {"v": PROTOCOL_VERSION, "id": req_id, "tok": token, "cmd": cmd, "args": args or {}}
-
-
-def build_ok(req_id, result, meta=None):
-    msg = {"v": PROTOCOL_VERSION, "id": req_id, "ok": True, "result": result}
+def build_ok(result, meta=None):
+    message = {"ok": True, "result": result}
     if meta:
-        msg["meta"] = meta
-    return msg
+        message["meta"] = meta
+    return message
 
 
-def build_error(req_id, code, message, data=None):
-    err = {"code": code, "message": message}
+def build_error(code, message, data=None):
+    error = {"code": code, "message": message}
     if data:
-        err["data"] = data
-    return {"v": PROTOCOL_VERSION, "id": req_id, "ok": False, "error": err}
+        error["data"] = data
+    return {"ok": False, "error": error}
 
 
 def is_ok(reply) -> bool:
     return isinstance(reply, dict) and reply.get("ok") is True
+
+
+def encode_bytes(value):
+    """JSON-safe copy of value with every bytes payload tagged.  Copy-on-write:
+    a subtree with no bytes is returned unchanged, so the common byte-free
+    envelope allocates nothing."""
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return {_BYTES_TAG: base64.b64encode(bytes(value)).decode("ascii")}
+    if isinstance(value, dict):
+        changed = None
+        for key, item in value.items():
+            encoded = encode_bytes(item)
+            if encoded is not item:
+                if changed is None:
+                    changed = dict(value)
+                changed[key] = encoded
+        return value if changed is None else changed
+    if isinstance(value, (list, tuple)):
+        changed = None
+        for index, item in enumerate(value):
+            encoded = encode_bytes(item)
+            if encoded is not item:
+                if changed is None:
+                    changed = list(value)
+                changed[index] = encoded
+        return value if changed is None else changed
+    return value
+
+
+def decode_bytes(value):
+    """Invert encode_bytes. Only an exact ``{"$idb.b64": str}`` dict decodes;
+    the key is reserved — handlers must not emit it themselves.  Copy-on-write,
+    like encode_bytes."""
+    if isinstance(value, dict):
+        if len(value) == 1 and isinstance(value.get(_BYTES_TAG), str):
+            return base64.b64decode(value[_BYTES_TAG])
+        changed = None
+        for key, item in value.items():
+            decoded = decode_bytes(item)
+            if decoded is not item:
+                if changed is None:
+                    changed = dict(value)
+                changed[key] = decoded
+        return value if changed is None else changed
+    if isinstance(value, list):
+        changed = None
+        for index, item in enumerate(value):
+            decoded = decode_bytes(item)
+            if decoded is not item:
+                if changed is None:
+                    changed = list(value)
+                changed[index] = decoded
+        return value if changed is None else changed
+    return value

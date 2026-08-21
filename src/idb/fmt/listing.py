@@ -2,7 +2,7 @@
 commands whose dedicated formatter hasn't landed yet."""
 
 import json
-import os
+import ntpath
 
 from .columns import align
 from .compact import escape_text, hx
@@ -47,7 +47,9 @@ def format_segments(result, ns=None):
 
 
 def format_saved(result, ns=None):
-    return f"saved {os.path.basename(result.get('saved') or '')}"
+    # IDA may return a path using the worker host's separators, which need not
+    # match the CLI host (for example, a Windows IDB rendered on macOS).
+    return f"saved {ntpath.basename(result.get('saved') or '')}"
 
 
 def format_funcs(result, ns=None):

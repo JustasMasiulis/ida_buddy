@@ -5,12 +5,12 @@ build-backend = "hatchling.build"
 [project]
 name = "ida-buddy"
 version = "0.1.0"
-description = "windbg-flavored CLI for headless IDA Pro reverse engineering (idalib)"
+description = "windbg-flavored CLI over the official IDA Nexus service"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "JustasMasiulis" }]
-dependencies = ["pyzmq>=27", "msgspec>=0.21", "idapro>=0.0.9"]
+dependencies = ["ida-nexus>=0.7.0"]
 
 [project.optional-dependencies]
 test = ["pytest>=8"]
@@ -24,3 +24,6 @@ packages = ["src/idb"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+
+[tool.uv]
+prerelease = "allow"
