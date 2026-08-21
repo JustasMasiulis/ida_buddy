@@ -130,3 +130,32 @@ def test_calls_defaults_to_bounded_callers(fake_ida_modules, monkeypatch):
     assert result["callers"][0]["ea"] == 0x500000
     assert result["callers"][-1]["ea"] == 0x500000 + 199
     assert meta == {"shown": 200, "truncated": True, "next_offset": 200}
+
+
+def test_ctx_row_survives_address_with_no_disasm_line(fake_ida_modules, monkeypatch):
+    """IDA records a dr_O xref to the refinfo base of every `dd rva X` item, and that
+    base (the PE header) is usually unmapped: generate_disasm_line returns null there
+    and tag_remove rejects a null, which used to abort the whole listing."""
+    xrefs = fake_ida_modules("xrefs")
+
+    class Xref:
+        type = xrefs.ida_xref.dr_O
+
+        def __init__(self, to):
+            self.frm = 0x1401BD46C
+            self.to = to
+
+    monkeypatch.setattr(
+        sys.modules["ida_lines"], "generate_disasm_line",
+        lambda ea, flags=0: None if ea == 0x140000000 else "dd rva RegistryCallback")
+    monkeypatch.setattr(sys.modules["ida_bytes"], "is_mapped",
+                        lambda ea: ea != 0x140000000, raising=False)
+    monkeypatch.setattr(xrefs.idahelp, "resolve_target", lambda addr: 0x1401BD46C)
+    monkeypatch.setattr(xrefs.idahelp, "func_name_at", lambda ea: None)
+    monkeypatch.setattr(xrefs.idautils, "XrefsFrom",
+                        lambda ea: iter([Xref(0x140000000), Xref(0x140098690)]))
+
+    result, _ = xrefs.xrefs(0x1401BD46C, direction="from")
+
+    assert [r["ea"] for r in result["data"]] == [0x140000000, 0x140098690]
+    assert [r["insn"] for r in result["data"]] == ["<unmapped>", "dd rva RegistryCallback"]

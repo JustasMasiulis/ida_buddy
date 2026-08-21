@@ -8,7 +8,6 @@ instruction at that address.
 import itertools
 import ida_bytes
 import ida_ida
-import ida_lines
 import ida_funcs
 import ida_name
 import ida_search
@@ -40,12 +39,9 @@ def _kind(xtype):
     return _KIND.get(xtype, "?")
 
 
-def _insn(ea):
-    return ida_lines.tag_remove(ida_lines.generate_disasm_line(ea, 0))
-
-
 def _ctx_row(ea, kind):
-    return {"ea": ea, "kind": kind, "func": idahelp.func_name_at(ea), "insn": _insn(ea)}
+    return {"ea": ea, "kind": kind, "func": idahelp.func_name_at(ea),
+            "insn": idahelp.disasm_at(ea)}
 
 
 def _find_bytes(pattern, start, end):
@@ -149,7 +145,7 @@ def calls(func, depth=1, offset=0, count=None):
                     if x.type not in _CALL_TYPES:
                         continue
                     yield {"ea": x.frm, "func": idahelp.func_name_at(x.frm),
-                           "insn": _insn(x.frm), "depth": level}
+                           "insn": idahelp.disasm_at(x.frm), "depth": level}
                     cf = ida_funcs.get_func(x.frm)
                     if cf is not None and cf.start_ea not in visited and len(visited) < _CALLER_CEILING:
                         visited.add(cf.start_ea)

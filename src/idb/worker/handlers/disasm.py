@@ -34,7 +34,7 @@ def _func_header(f):
 def _line(ea):
     return {
         "ea": ea,
-        "text": ida_lines.tag_remove(ida_lines.generate_disasm_line(ea, 0)),
+        "text": idahelp.disasm_at(ea),
         "size": ida_bytes.get_item_size(ea),
     }
 
