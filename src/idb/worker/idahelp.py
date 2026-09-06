@@ -106,6 +106,19 @@ def til():
     return ida_typeinf.get_idati()
 
 
+def disasm_at(ea):
+    """Tag-free disassembly text at `ea`. IDA produces no line for an unmapped or
+    BADADDR address and tag_remove rejects the resulting null, so degrade to a
+    marker rather than raising out of the middle of a listing."""
+    import ida_bytes
+    import ida_lines
+
+    line = ida_lines.generate_disasm_line(ea, 0)
+    if line is None:
+        return "<unmapped>" if not ida_bytes.is_mapped(ea) else "<no disasm>"
+    return ida_lines.tag_remove(line)
+
+
 def func_name_at(ea):
     import ida_funcs
 

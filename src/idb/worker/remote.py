@@ -17,8 +17,14 @@ def _analysis_ready() -> bool:
     """Non-mutating analysis probe; never enables auto-analysis in the target."""
     try:
         import ida_auto
+        import ida_ida
 
-        return bool(ida_auto.auto_is_ok())
+        # Analysis switched off is a settled state, not a pending one:
+        # auto_is_ok() stays False forever, so gating on it alone locks the
+        # database out permanently. Intent lives in IDA's persistent flag --
+        # the runtime analyzer is suspended by ordinary GUI actions and so
+        # cannot distinguish "disabled" from "momentarily paused".
+        return bool(ida_auto.auto_is_ok()) or not ida_ida.inf_is_auto_enabled()
     except Exception:
         return True
 

@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "JustasMasiulis" }]
-dependencies = ["ida-nexus>=0.7.0"]
+dependencies = ["ida-nexus>=0.10.4"]
 
 [project.optional-dependencies]
 test = ["pytest>=8"]
