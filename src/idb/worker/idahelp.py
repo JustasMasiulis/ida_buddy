@@ -260,14 +260,20 @@ def safe_decompile(ea):
     raising IDA_ERROR on failure or a null result. Use only at sites whose policy
     is to raise; loop sites that `continue` and `(None, None)` sites stay inline."""
     import ida_hexrays
+    import ida_idaapi
 
     ida_hexrays.mark_cfunc_dirty(ea)
+    # Always pass a failure object: without one, IDA 9's Python wrapper returns
+    # None on failure and the reason (e.g. "function frame is wrong") is lost.
+    hf = ida_hexrays.hexrays_failure_t()
     try:
-        cfunc = ida_hexrays.decompile(ea)
+        cfunc = ida_hexrays.decompile(ea, hf, 0)
     except ida_hexrays.DecompilationFailure as exc:
         raise IdbError(protocol.IDA_ERROR, f"decompilation failed: {exc}")
     if cfunc is None:
-        raise IdbError(protocol.IDA_ERROR, "decompilation returned null")
+        where = hf.errea if hf.errea != ida_idaapi.BADADDR else ea
+        raise IdbError(protocol.IDA_ERROR,
+                       f"decompilation failed at {where:#x}: {hf.desc()} (hexrays code {hf.code})")
     return cfunc
 
 

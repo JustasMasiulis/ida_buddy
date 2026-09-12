@@ -711,13 +711,7 @@ def union_select(addr, name=None, index=None):
     # Locate the union access on a fresh ctree: a cached cfunc can place the
     # access at a stale spot after a referenced struct or callee retype, so the
     # selection would be keyed to the wrong site.
-    ida_hexrays.mark_cfunc_dirty(f.start_ea)
-    try:
-        cfunc = ida_hexrays.decompile(f.start_ea)
-    except ida_hexrays.DecompilationFailure as exc:
-        raise IdbError(protocol.IDA_ERROR, f"decompilation failed: {exc}")
-    if cfunc is None:
-        raise IdbError(protocol.IDA_ERROR, "decompilation produced no result")
+    cfunc = idahelp.safe_decompile(f.start_ea)
     cfunc.get_pseudocode()
 
     union_ops = (ida_hexrays.cot_memptr, ida_hexrays.cot_memref)

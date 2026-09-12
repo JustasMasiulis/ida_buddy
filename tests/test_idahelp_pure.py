@@ -106,3 +106,31 @@ def test_parse_int_rejects_bad_arguments(bad, hex_default):
         idahelp.parse_int(bad, hex_default, what="thing")
     assert ei.value.code == protocol.BAD_ARGS and "thing must be" in ei.value.message
 
+
+def test_safe_decompile_reports_hexrays_failure_reason(monkeypatch):
+    import sys
+    import types as _types
+
+    class Failure:
+        code = 0
+        errea = -1
+
+        def desc(self):
+            return "function frame is wrong"
+
+    def decompile(ea, hf, flags):
+        hf.code, hf.errea = -13, ea  # IDA 9 returns None and fills hf instead of raising
+        return None
+
+    fake = _types.ModuleType("ida_hexrays")
+    fake.hexrays_failure_t = Failure
+    fake.DecompilationFailure = type("DecompilationFailure", (Exception,), {})
+    fake.mark_cfunc_dirty = lambda ea: None
+    fake.decompile = decompile
+    monkeypatch.setitem(sys.modules, "ida_hexrays", fake)
+    monkeypatch.setitem(sys.modules, "ida_idaapi", _types.SimpleNamespace(BADADDR=-1))
+
+    with pytest.raises(IdbError) as ei:
+        idahelp.safe_decompile(0x140146F68)
+    assert ei.value.code == protocol.IDA_ERROR
+    assert ei.value.message == "decompilation failed at 0x140146f68: function frame is wrong (hexrays code -13)"
