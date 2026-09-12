@@ -220,6 +220,17 @@ def test_xrefs_returns_context(client):
         assert {"ea", "kind", "insn"} <= set(row)
 
 
+def test_xrefs_resolves_import_by_bare_name(client):
+    imports, _ = ok(client, "imports", {"count": 1})
+    if not imports["data"]:
+        pytest.skip("binary has no imports")
+    imp = imports["data"][0]
+    result, _ = ok(client, "xrefs", {"addr": imp["name"]})
+    assert result["addr"] == imp["ea"]
+
+
+
+
 def test_xrefs_both_tags_direction(client):
     result, _ = ok(client, "xrefs", {"addr": hex(_entry_ea(client)), "direction": "both"})
     assert isinstance(result["data"], list)

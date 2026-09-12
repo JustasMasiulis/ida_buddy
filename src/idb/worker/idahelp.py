@@ -81,8 +81,35 @@ def name_filter(pattern):
     return lambda name: needle in (name or "").lower()
 
 
+def import_ea(name):
+    """IAT slot of the import called `name` (as shown by `imports`), or BADADDR.
+    Imports have no symbol under their bare name: IDA names the slot
+    `__imp_<name>` and only user-mode thunks get the bare name."""
+    import ida_idaapi
+    import ida_name
+    import ida_nalt
+
+    ea = ida_name.get_name_ea(ida_idaapi.BADADDR, "__imp_" + name)
+    if ea != ida_idaapi.BADADDR:
+        return ea
+    found = [ida_idaapi.BADADDR]
+
+    def cb(slot, imp_name, ordinal):
+        if imp_name == name:
+            found[0] = slot
+            return False
+        return True
+
+    for i in range(ida_nalt.get_import_module_qty()):
+        ida_nalt.enum_import_names(i, cb)
+        if found[0] != ida_idaapi.BADADDR:
+            break
+    return found[0]
+
+
 def resolve_target(value):
-    """ea from int, explicit 0x/0n number, a symbol name, or bare-hex fallback."""
+    """ea from int, explicit 0x/0n number, a symbol name, an import name
+    (-> its IAT slot), or bare-hex fallback."""
     import ida_idaapi
     import ida_name
 
@@ -92,6 +119,8 @@ def resolve_target(value):
     if s.lower().startswith(("0x", "0n")):
         return parse_addr(s)
     ea = ida_name.get_name_ea(ida_idaapi.BADADDR, s)
+    if ea == ida_idaapi.BADADDR:
+        ea = import_ea(s)
     if ea != ida_idaapi.BADADDR:
         return ea
     try:
