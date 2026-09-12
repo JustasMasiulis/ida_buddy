@@ -93,7 +93,14 @@ def _string_search_gen(pattern, start, end, budget):
 
 
 def _to_rows(ea, tag):
+    # One instruction can carry both a code and a data xref to the same target
+    # (e.g. `call cs:__imp_X`); IDA yields code xrefs first, so the first row
+    # keeps the more specific kind and later duplicates of that site are dropped.
+    seen = set()
     for x in idautils.XrefsTo(ea):
+        if x.frm in seen:
+            continue
+        seen.add(x.frm)
         row = _ctx_row(x.frm, _kind(x.type))
         if tag:
             row["dir"] = "to"
@@ -101,7 +108,11 @@ def _to_rows(ea, tag):
 
 
 def _from_rows(ea, tag):
+    seen = set()
     for x in idautils.XrefsFrom(ea):
+        if x.to in seen:
+            continue
+        seen.add(x.to)
         row = _ctx_row(x.to, _kind(x.type))
         if tag:
             row["dir"] = "from"

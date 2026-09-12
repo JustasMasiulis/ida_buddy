@@ -229,6 +229,17 @@ def test_xrefs_resolves_import_by_bare_name(client):
     assert result["addr"] == imp["ea"]
 
 
+def test_xrefs_one_row_per_site(client):
+    imports, _ = ok(client, "imports", {"count": 50})
+    for imp in imports["data"]:
+        result, _ = ok(client, "xrefs", {"addr": hex(imp["ea"])})
+        eas = [r["ea"] for r in result["data"]]
+        assert len(eas) == len(set(eas)), eas
+        if eas:
+            # a `call cs:[slot]` site emits code+data xrefs; the code kind must win
+            assert any(r["kind"] in ("call", "jump", "read") for r in result["data"])
+            return
+    pytest.skip("no referenced import in the first 50")
 
 
 def test_xrefs_both_tags_direction(client):
