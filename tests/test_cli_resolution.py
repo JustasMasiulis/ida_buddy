@@ -310,19 +310,23 @@ def test_member_selector_must_be_explicit(argv, capsys):
 def test_insert_member_resolution():
     assert _request(["insert_member", "Foo", "int", "count", "--after", "a"]) == (
         "insert_member",
-        {"type": "Foo", "new_type": "int", "name": "count", "before": None, "after": "a", "at": None},
+        {"type": "Foo", "new_type": "int", "name": "count", "before": None, "after": "a", "at": None, "index": None},
     )
     assert _request(["insert_member", "Foo", "int", "count", "--before", "c"]) == (
         "insert_member",
-        {"type": "Foo", "new_type": "int", "name": "count", "before": "c", "after": None, "at": None},
+        {"type": "Foo", "new_type": "int", "name": "count", "before": "c", "after": None, "at": None, "index": None},
     )
     assert _request(["insert_member", "Foo", "int", "count", "--at", "0x10"]) == (
         "insert_member",
-        {"type": "Foo", "new_type": "int", "name": "count", "before": None, "after": None, "at": "0x10"},
+        {"type": "Foo", "new_type": "int", "name": "count", "before": None, "after": None, "at": "0x10", "index": None},
     )
     assert _request(["insert_member", "Foo", "void *", "ctx"]) == (
         "insert_member",
-        {"type": "Foo", "new_type": "void *", "name": "ctx", "before": None, "after": None, "at": None},
+        {"type": "Foo", "new_type": "void *", "name": "ctx", "before": None, "after": None, "at": None, "index": None},
+    )
+    assert _request(["insert_member", "Foo", "int", "first", "--index", "0"]) == (
+        "insert_member",
+        {"type": "Foo", "new_type": "int", "name": "first", "before": None, "after": None, "at": None, "index": 0},
     )
 
 

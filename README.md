@@ -64,7 +64,7 @@ Aliases in parens. `[mut]` mutates the database (creates an undo point).
 | `declare ("<C>" \| --file P \| @P)` *(mut)* | create types |
 | `settype <target> <type>` / `setlvar <func> <var> [--name N] [--type T]` *(mut)* | apply types / rename and retype Hex-Rays locals |
 | `set_member <struct> <type> (--name N\|--at OFF\|--index I) [--rename NEW]` *(mut)* | retype/rename a member; a larger type absorbs the members it now overlaps |
-| `insert_member <struct> <type> <name> [--before N\|--after N\|--at OFF]` *(mut)* | add a member (shifts following members down); appends if no anchor |
+| `insert_member <struct> <type> <name> [--before N\|--after N\|--at OFF\|--index I]` *(mut)* | add a member (shifts following members down); appends if no anchor |
 | `del_member <struct> (--name N\|--at OFF\|--index I) [--leave-gap]` *(mut)* | remove a member, closing the gap (`--leave-gap` keeps offsets fixed) |
 | `enum <name> <k=v,...> [--bitfield]` *(mut)* | create or extend an enum |
 | `patch <addr> <hex>` *(mut)* | patch bytes |

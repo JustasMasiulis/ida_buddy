@@ -385,7 +385,7 @@ def build_parser():
     sp.add_argument("--rename", metavar="NEW_NAME", default=None)
     sp = cmd("insert_member", help="add a struct member before/after/at another, else append [mut]",
              ex=("insert_member Foo int count --after a", "insert_member Foo int flags --at 0x10",
-                 "insert_member Foo void *ctx"))
+                 "insert_member Foo int first --index 0", "insert_member Foo void *ctx"))
     sp.add_argument("type")
     sp.add_argument("new_type")
     sp.add_argument("name")
@@ -394,6 +394,8 @@ def build_parser():
     g.add_argument("--after", metavar="NAME", default=None, help="insert after this member")
     g.add_argument("--at", metavar="OFF", default=None,
                    help="insert before the member at this byte offset (bare hex; 0n for decimal)")
+    g.add_argument("--index", metavar="I", type=_count, default=None,
+                   help="insert as member #I (0-based; I == member count appends)")
     sp = cmd("del_member", help="remove a struct member, closing the gap [mut]",
              ex=("del_member Foo --name b", "del_member Foo --at 0x8 --leave-gap"))
     sp.add_argument("type")
@@ -537,7 +539,7 @@ def build_request(ns):
                    "name": ns.name, "at": ns.at, "index": ns.index}
     if c == "insert_member":
         return c, {"type": ns.type, "new_type": ns.new_type, "name": ns.name,
-                   "before": ns.before, "after": ns.after, "at": ns.at}
+                   "before": ns.before, "after": ns.after, "at": ns.at, "index": ns.index}
     if c == "del_member":
         return c, {"type": ns.type, "leave_gap": ns.leave_gap,
                    "name": ns.name, "at": ns.at, "index": ns.index}

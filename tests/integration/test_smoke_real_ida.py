@@ -950,3 +950,13 @@ def test_free_totals_always_reported(client):
         assert meta["total"] >= len(reply["result"]["lines"]) == meta["shown"]
 
 
+def test_insert_member_by_index_shifts_and_appends(client):
+    ok(client, "declare", {"text": "struct INS_IDX { int a; int c; };"})
+    res, _ = ok(client, "insert_member", {"type": "INS_IDX", "new_type": "int", "name": "b", "index": 1})
+    assert (res["index"], res["offset"]) == (1, 4)
+    by_off = _members_by_off(client, "INS_IDX")
+    assert (by_off[4][0], by_off[8][0]) == ("b", "c")  # c shifted down
+    res, _ = ok(client, "insert_member", {"type": "INS_IDX", "new_type": "int", "name": "d", "index": 3})
+    assert (res["index"], res["offset"]) == (3, 12)  # index == count appends
+    reply = client.call("insert_member", {"type": "INS_IDX", "new_type": "int", "name": "e", "index": 9})
+    assert reply["error"]["code"] == protocol.NOT_FOUND

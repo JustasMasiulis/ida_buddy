@@ -554,9 +554,10 @@ def set_member(type, new_type, name=None, at=None, index=None, new_name=None):
 
 
 @handler("insert_member", writes=True)
-def insert_member(type, new_type, name, before=None, after=None, at=None):
-    if sum(anchor is not None for anchor in (before, after, at)) > 1:
-        raise IdbError(protocol.BAD_ARGS, "insert_member takes at most one of --before/--after/--at")
+def insert_member(type, new_type, name, before=None, after=None, at=None, index=None):
+    if sum(anchor is not None for anchor in (before, after, at, index)) > 1:
+        raise IdbError(protocol.BAD_ARGS,
+                       "insert_member takes at most one of --before/--after/--at/--index")
     def_name, target, udt, type_cmt, repeatable = _load_writable_udt(type)
     is_union = target.is_union()
     member = T.udm_t()
@@ -568,7 +569,15 @@ def insert_member(type, new_type, name, before=None, after=None, at=None):
     member.size = width
 
     count = udt.size()
-    if before is None and after is None and at is None:
+    if index is not None:
+        # Ordinal position: the new member becomes member #pos and the rest shift
+        # down; pos == count appends.
+        pos = idahelp.parse_int(index, hex_default=False, what="--index")
+        if pos > count:
+            raise IdbError(protocol.NOT_FOUND,
+                           f"index {pos} is past the end of {type!r} ({count} members)")
+        insert_off = 0 if is_union else (target.get_size() * 8 if pos == count else udt[pos].offset)
+    elif before is None and after is None and at is None:
         pos = count
         insert_off = 0 if is_union else target.get_size() * 8
     else:
