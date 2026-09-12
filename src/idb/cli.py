@@ -143,7 +143,7 @@ def _session_flags():
     g.add_argument("-t", "--timeout", type=float, default=argparse.SUPPRESS,
                    help="client wait, seconds")
     g.add_argument("-v", "--verbose", action="count", default=argparse.SUPPRESS,
-                   help="more detail on stderr")
+                   help="print instance details on open")
     return g
 
 
@@ -179,15 +179,25 @@ _ROOT_DESCRIPTION = (
 _ROOT_EPILOG = (
     "conventions:\n"
     "  addresses    0x401000, a name (sub_401000), or an expression\n"
-    "  pagination   -o/--offset + -n/--count; a [+more; resume with -o N] hint prints to stderr;\n"
+    "  pagination   -o/--offset + -n/--count; a [+more; resume with -o N] hint follows a cut page;\n"
+    "  output       everything (data, banners, warnings, errors) prints to stdout; exit code signals failure\n"
     "               --total adds full counts where supported (see each command's -h)\n"
     "  mutations    [mut] commands modify the database; undo/redo revert them"
 )
 
 
+class _Parser(argparse.ArgumentParser):
+    """Usage errors print to stdout like every other idb message; subparsers
+    inherit this class through add_subparsers' parser_class default."""
+
+    def _print_message(self, message, file=None):
+        if message:
+            sys.stdout.write(message)
+
+
 def build_parser():
     command_globals = _session_flags()
-    p = argparse.ArgumentParser(
+    p = _Parser(
         prog="idb",
         description=_ROOT_DESCRIPTION,
         epilog=_ROOT_EPILOG,
@@ -517,7 +527,7 @@ def resolve_session(ns):
         return nexus.resolve_target(session=ns.session, idb=ns.idb)
     except IdbError as exc:
         if exc.code == AMBIGUOUS and isinstance(exc.data, list):
-            print(fmt_sessions.format_sessions(exc.data), file=sys.stderr)
+            print(fmt_sessions.format_sessions(exc.data))
             raise IdbError(exc.code, exc.message) from exc
         raise
 
@@ -535,18 +545,20 @@ def _banner(meta):
 def emit(rpc_cmd, reply, ns):
     if not protocol.is_ok(reply):
         err = reply["error"]
-        print(f"idb: {err['code']}: {err['message']}", file=sys.stderr)
+        print(f"idb: {err['code']}: {err['message']}")
         return exit_code_for(err["code"])
+    # Everything goes to stdout: agents routinely drop stderr and then reason
+    # from a truncated page or an empty result. Warnings lead, data follows, and
+    # the pagination banner comes last so it sits where the cut happened.
+    meta = reply.get("meta") or {}
+    if meta.get("warning"):
+        print(f"idb: warning: {meta['warning']}")
     text = FORMATTERS.get(rpc_cmd, listing.format_generic)(reply.get("result"), ns)
     if text:
         print(text)
-    meta = reply.get("meta")
-    if meta:
-        if meta.get("warning"):
-            print(f"idb: warning: {meta['warning']}", file=sys.stderr)
-        line = _banner(meta)
-        if line:
-            print(line, file=sys.stderr)
+    line = _banner(meta)
+    if line:
+        print(line)
     return 0
 
 
@@ -579,11 +591,8 @@ def cmd_open(ns):
         reply = nexus.envelope_from_execution(execution)
         if ns.verbose:
             entry = handle.instance
-            print(
-                f"instance {entry.record_id}  backend {entry.backend}  "
-                f"port {entry.port}  pid {entry.pid}",
-                file=sys.stderr,
-            )
+            print(f"instance {entry.record_id}  backend {entry.backend}  "
+                  f"port {entry.port}  pid {entry.pid}")
     return emit("open_summary", reply, ns)
 
 
@@ -592,7 +601,7 @@ def _emit_paginated(rows, formatter, ns):
     print(formatter(page))
     meta = _banner({"shown": len(page), "truncated": True, "next_offset": next_offset}) if next_offset is not None else ""
     if meta:
-        print(meta, file=sys.stderr)
+        print(meta)
 
 
 def cmd_sessions(ns):
@@ -628,7 +637,7 @@ def cmd_close(ns):
         ns.session = ns.session_pos
     entries = _close_targets(ns)
     if not entries:
-        print("no managed workers to close", file=sys.stderr)
+        print("no managed workers to close")
         return 0
     save = not ns.no_save
     for entry in entries:
@@ -637,8 +646,7 @@ def cmd_close(ns):
                            f"{entry.record_id} is a GUI instance; close it in IDA itself")
         with nexus.session(entry, timeout=30.0, linger=0.0, wait=False) as handle:
             handle.shutdown_database(save=save)
-        print(f"closed {entry.record_id} ({'saved' if save else 'changes discarded'})",
-              file=sys.stderr)
+        print(f"closed {entry.record_id} ({'saved' if save else 'changes discarded'})")
     return 0
 
 
@@ -695,7 +703,7 @@ def main(argv=None):
         ignored.append("--total")
     normalize_namespace(ns)
     if ignored:
-        print(f"idb: warning: {ns.command} ignores {', '.join(ignored)}", file=sys.stderr)
+        print(f"idb: warning: {ns.command} ignores {', '.join(ignored)}")
 
     try:
         if ns.command in LIFECYCLE:
@@ -703,9 +711,9 @@ def main(argv=None):
         rpc_cmd, rpc_args = build_request(ns)
         return run_remote(ns, rpc_cmd, rpc_args)
     except IdbError as exc:
-        print(f"idb: {exc.code}: {exc.message}", file=sys.stderr)
+        print(f"idb: {exc.code}: {exc.message}")
         if exc.data:
-            print(str(exc.data), file=sys.stderr)
+            print(str(exc.data))
         return exit_code_for(exc.code)
 
 

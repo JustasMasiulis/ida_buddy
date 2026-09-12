@@ -102,3 +102,11 @@ def remove_workspace(path):
         if not os.path.isdir(path):
             return
         time.sleep(0.5)
+
+
+def table_rows(stdout):
+    """Data lines of a table printed by idb: drops the header line and the
+    prefixed non-row lines that share stdout (`[+more ...]`, `[total N]`,
+    `idb: warning: ...`)."""
+    return [line for line in stdout.splitlines()[1:]
+            if line and not line.startswith(("[", "idb:"))]

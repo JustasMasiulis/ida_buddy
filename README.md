@@ -184,8 +184,9 @@ Global flags: `-s/--session`, `--idb`, `-o/--offset`, `-n/--count`, `-t/--timeou
 `--total`, `-v/--verbose`. Addresses are hex by default (windbg style); `0n`
 prefixes decimal; a symbol name resolves to its address.
 
-**Data goes to stdout**; banners, errors, and
-`[+more]` truncation notices go to **stderr** (never ingested as data).
+**Everything goes to stdout** — data, `[+more]` truncation notices, warnings and
+`idb: <CODE>: <message>` errors — so nothing is lost when only stdout is captured; a
+non-zero exit code signals failure.
 Sequence-style output paginates with `-o/--offset` + `-n/--count`.
 For `disas`, the target itself may be a symbol or address (`idb disas 0x401740 -n 32`).
 Use `-o/--offset` only to resume paginated output after a `[+more]` notice.

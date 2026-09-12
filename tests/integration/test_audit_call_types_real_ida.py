@@ -100,9 +100,9 @@ def test_total_banner(session):
     env = session["env"]
     res = _run(env, "audit_call_types", "--total", "-n", "1", "--budget", "8", "-t", "120", timeout=180)
     head = _header(res.stdout)
-    m = re.search(r"\[total (\d+)\]", res.stderr)
+    m = re.search(r"\[total (\d+)\]", res.stdout)
     if head["findings"] >= 1:
-        assert m, f"expected a [total N] banner on stderr:\n{res.stderr}"
+        assert m, f"expected a [total N] banner on stdout:\n{res.stdout}"
         assert int(m.group(1)) >= 1
 
 

@@ -124,5 +124,5 @@ def test_triage_rejects_non_function(session):
     env = session["env"]
     res = _run(env, "triage", "0n0", check=False)
     assert res.returncode == 1
-    assert res.stdout == ""
-    assert res.stderr.strip()
+    assert res.stdout.startswith("idb: ")
+    assert res.stderr == ""

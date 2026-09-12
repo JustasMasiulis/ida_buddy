@@ -2,7 +2,7 @@
 
 These tests intentionally run ``python -m idb ...`` subprocesses instead of
 calling remote handlers directly. The goal is to cover the surface users and agents
-actually interact with: command aliases, stdout/stderr separation, pagination
+actually interact with: command aliases, everything-on-stdout output, pagination
 prompts, exit codes, and short multi-command workflows.
 """
 
@@ -15,7 +15,7 @@ import uuid
 
 import pytest
 
-from _helpers import ROOT, make_env, remove_workspace, shutdown_workers, run_idb as _run
+from _helpers import ROOT, make_env, remove_workspace, shutdown_workers, table_rows, run_idb as _run
 
 DEFAULT_BINARY = ROOT / "tests" / "fixtures" / "where.exe"
 BINARY = pathlib.Path(os.environ.get("IDB_TEST_BINARY", DEFAULT_BINARY)).resolve()
@@ -66,7 +66,7 @@ def cli_session(cli_workspace):
 def _first_function(env):
     res = _run(env, "funcs", "-n", "8", "--total")
     assert "ADDR" in res.stdout and "NAME" in res.stdout
-    assert "[total " in res.stderr
+    assert "[total " in res.stdout
 
     for line in res.stdout.splitlines()[1:]:
         parts = line.split(maxsplit=2)
@@ -78,7 +78,7 @@ def _first_function(env):
 def _first_string_text(env):
     res = _run(env, "strings", "-n", "80")
     assert "ADDR" in res.stdout and "STRING" in res.stdout
-    for line in res.stdout.splitlines()[1:]:
+    for line in table_rows(res.stdout):
         parts = line.split(maxsplit=2)
         if len(parts) == 3 and len(parts[2]) >= 4 and parts[2][:8].isprintable():
             return parts[2][:8]
@@ -115,9 +115,9 @@ def test_listing_pagination_and_total_contract(cli_session):
 
     lines = res.stdout.splitlines()
     assert lines[0].split() == ["ADDR", "SIZE", "NAME"]
-    assert len(lines) == 3
-    assert "[+more; resume with -o 2]" in res.stderr
-    assert "[total " in res.stderr
+    assert lines[3] == "[+more; resume with -o 2] [total " + lines[3].split("[total ")[1]
+    assert len(lines) == 4
+    assert res.stderr == ""
 
 
 def test_function_triage_workflow_accepts_copied_addresses(cli_session):
@@ -142,7 +142,7 @@ def test_function_triage_workflow_accepts_copied_addresses(cli_session):
 
     xrefs = _run(env, "xref_to", addr, "-n", "3")
     assert xrefs.stdout.strip()
-    assert xrefs.stderr == "" or "[+more" in xrefs.stderr
+    assert xrefs.stderr == ""
 
 
 def test_memory_aliases_are_compact_and_parseable(cli_session):
@@ -176,7 +176,7 @@ def test_type_workflow_uses_type_names_from_listing(cli_session):
     env = cli_session["env"]
 
     types = _run(env, "types", "-k", "struct", "-n", "20")
-    for line in types.stdout.splitlines()[1:]:
+    for line in table_rows(types.stdout):
         parts = line.split(maxsplit=3)
         if len(parts) == 4:
             name = parts[3]
@@ -195,7 +195,7 @@ def test_type_workflow_uses_type_names_from_listing(cli_session):
 
 def _struct_rows(stdout):
     rows = []
-    for line in stdout.splitlines()[1:]:
+    for line in table_rows(stdout):
         parts = line.split(maxsplit=3)
         if len(parts) == 4:
             rows.append(parts)
@@ -228,8 +228,8 @@ def test_type_pattern_with_addr_errors(cli_session):
     env = cli_session["env"]
     res = _run(env, "type", "IMAGE_*", "0x1000", check=False)
     assert res.returncode != 0
-    assert res.stdout.strip() == ""
-    assert "search takes a pattern" in res.stderr
+    assert "search takes a pattern" in res.stdout
+    assert res.stderr == ""
 
 
 def test_eval_command_computes_and_resolves(cli_session):
@@ -246,8 +246,8 @@ def test_eval_command_computes_and_resolves(cli_session):
 
     bad = _run(env, "?", "definitely_not_a_symbol_zzz", check=False)
     assert bad.returncode == 1
-    assert bad.stdout == ""
-    assert bad.stderr.strip()
+    assert bad.stdout.startswith("idb: NOT_FOUND:")
+    assert bad.stderr == ""
 
 
 def test_safe_mutation_flow_round_trips_with_undo(cli_session):

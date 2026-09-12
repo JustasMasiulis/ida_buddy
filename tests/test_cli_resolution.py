@@ -52,8 +52,10 @@ def test_sessions_paginates_discovered_rows(monkeypatch, capsys):
     assert cli.cmd_sessions(_ns(offset=1, count=1)) == 0
 
     captured = capsys.readouterr()
-    assert captured.out.splitlines()[1].split()[0] == "b"
-    assert "[+more; resume with -o 2]" in captured.err
+    lines = captured.out.splitlines()
+    assert lines[1].split()[0] == "b"
+    assert lines[-1] == "[+more; resume with -o 2]"
+    assert captured.err == ""
 
 
 class FakeHandle:
@@ -378,7 +380,7 @@ def test_close_shuts_down_and_discards(monkeypatch, capsys):
     assert cli.cmd_close(ns) == 0
 
     assert handle.shutdowns == [False] and handle.closed
-    assert "changes discarded" in capsys.readouterr().err
+    assert "changes discarded" in capsys.readouterr().out
 
 
 def test_close_refuses_gui_instances(monkeypatch):
@@ -392,11 +394,12 @@ def test_close_refuses_gui_instances(monkeypatch):
     assert error.value.code == protocol.BAD_ARGS
 
 
-def test_emit_renders_struct_redirect_and_warns_on_stderr(capsys):
+def test_emit_prints_warning_before_data_on_stdout(capsys):
     result = {"addr": 0x2000, "wide": False, "length": 3, "maxlen": 4,
               "buffer": 0x3000, "text": "abc", "redirected_to_struct": True}
     reply = protocol.build_ok(result, {"warning": "0x2000 is typed ANSI_STRING; use `ds`"})
     assert cli.emit("string", reply, _ns()) == 0
     captured = capsys.readouterr()
-    assert captured.out.strip() == '2000  ANSI_STRING len=3 max=4 buf=3000  "abc"'
-    assert "idb: warning: 0x2000 is typed ANSI_STRING; use `ds`" in captured.err
+    assert captured.out.splitlines() == ["idb: warning: 0x2000 is typed ANSI_STRING; use `ds`",
+                                         '2000  ANSI_STRING len=3 max=4 buf=3000  "abc"']
+    assert captured.err == ""
