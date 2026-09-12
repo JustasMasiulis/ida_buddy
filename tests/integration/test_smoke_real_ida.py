@@ -229,6 +229,64 @@ def test_xrefs_resolves_import_by_bare_name(client):
     assert result["addr"] == imp["ea"]
 
 
+def test_resolve_name_case_insensitive(client):
+    imports, _ = ok(client, "imports", {"count": 1})
+    if not imports["data"]:
+        pytest.skip("binary has no imports")
+    imp = imports["data"][0]
+    result, _ = ok(client, "xrefs", {"addr": imp["name"].swapcase()})
+    assert result["addr"] == imp["ea"]
+
+
+def test_resolve_demangled_name(client):
+    ea = _entry_ea(client)
+    ok(client, "rename", {"addr": hex(ea), "name": "_ZN8IdbSmoke5EntryEPv"})  # IdbSmoke::Entry(void *)
+    try:
+        for form in ("IdbSmoke::Entry", "IdbSmoke::Entry(void *)", "idbsmoke::entry"):
+            result, _ = ok(client, "xrefs", {"addr": form})
+            assert result["addr"] == ea, form
+    finally:
+        ok(client, "undo")
+
+
+def _two_named_addresses(client):
+    imports, _ = ok(client, "imports", {"count": 2})
+    if len(imports["data"]) < 2:
+        pytest.skip("binary has fewer than two imports")
+    return imports["data"][0]["ea"], imports["data"][1]["ea"]
+
+
+def test_resolve_ambiguous_demangled_overloads(client):
+    a, b = _two_named_addresses(client)
+    ok(client, "rename", {"addr": hex(a), "name": "_ZN8IdbSmoke4OverEi"})   # IdbSmoke::Over(int)
+    ok(client, "rename", {"addr": hex(b), "name": "_ZN8IdbSmoke4OverEPv"})  # IdbSmoke::Over(void *)
+    try:
+        reply = client.call("xrefs", {"addr": "IdbSmoke::Over"})
+        assert reply["error"]["code"] == "AMBIGUOUS", reply
+        assert "_ZN8IdbSmoke4OverEi" in reply["error"]["message"]
+        assert {c["ea"] for c in reply["error"]["data"]} == {a, b}
+        result, _ = ok(client, "xrefs", {"addr": "IdbSmoke::Over(int)"})  # parameters disambiguate
+        assert result["addr"] == a
+    finally:
+        ok(client, "undo")
+        ok(client, "undo")
+
+
+def test_resolve_case_clash_needs_exact_match(client):
+    a, b = _two_named_addresses(client)
+    ok(client, "rename", {"addr": hex(a), "name": "IdbSmokeCase"})
+    ok(client, "rename", {"addr": hex(b), "name": "IDBSMOKECASE"})
+    try:
+        reply = client.call("xrefs", {"addr": "idbsmokecase"})
+        assert reply["error"]["code"] == "AMBIGUOUS", reply
+        assert "IdbSmokeCase" in reply["error"]["message"] and "IDBSMOKECASE" in reply["error"]["message"]
+        result, _ = ok(client, "xrefs", {"addr": "IDBSMOKECASE"})  # exact case still wins
+        assert result["addr"] == b
+    finally:
+        ok(client, "undo")
+        ok(client, "undo")
+
+
 def test_xrefs_one_row_per_site(client):
     imports, _ = ok(client, "imports", {"count": 50})
     for imp in imports["data"]:

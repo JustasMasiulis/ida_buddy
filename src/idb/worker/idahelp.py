@@ -9,7 +9,7 @@ import re
 import fnmatch
 
 from idb import protocol
-from idb.errors import IdbError
+from idb.errors import AMBIGUOUS, IdbError
 
 _SENTINEL = object()
 
@@ -107,9 +107,54 @@ def import_ea(name):
     return found[0]
 
 
+_AMBIGUOUS_LIST_CAP = 16
+
+
+def _ambiguous(name, matches):
+    lines = [f"{name!r} matches {len(matches)} names; use one of:"]
+    lines += [f"  {ea:#x}  {raw}" for ea, raw in matches[:_AMBIGUOUS_LIST_CAP]]
+    if len(matches) > _AMBIGUOUS_LIST_CAP:
+        lines.append(f"  ... {len(matches) - _AMBIGUOUS_LIST_CAP} more")
+    raise IdbError(AMBIGUOUS, "\n".join(lines),
+                   [{"ea": ea, "name": raw} for ea, raw in matches])
+
+
+def scan_names(name):
+    """Slow-path lookup over the whole name table, used only after the exact
+    lookups miss. Two tiers, each matching `name` against every raw name (with
+    any `__imp_` prefix ignored) and its demangled forms: the name-only form
+    Hex-Rays prints (`Foo::bar`) and the short form with parameters
+    (`Foo::bar(int)`). Tier 1 is exact-case, tier 2 is case-folded; the first
+    non-empty tier is used, and it must hold exactly one address or the lookup
+    fails with AMBIGUOUS listing every candidate. Returns BADADDR on no match."""
+    import ida_idaapi
+    import ida_name
+    import idautils
+
+    want = name.lower()
+    exact = []
+    folded = []
+    for ea, raw in idautils.Names():
+        forms = [raw[len("__imp_"):]] if raw.startswith("__imp_") else [raw]
+        for flags in (ida_name.MNG_NODEFINIT, ida_name.MNG_SHORT_FORM):
+            demangled = ida_name.demangle_name(raw, flags)
+            if demangled:
+                forms.append(demangled)
+        if name in forms:
+            exact.append((ea, raw))
+        elif any(form.lower() == want for form in forms):
+            folded.append((ea, raw))
+    matches = exact or folded
+    if not matches:
+        return ida_idaapi.BADADDR
+    if len(matches) > 1:
+        _ambiguous(name, matches)
+    return matches[0][0]
+
+
 def resolve_target(value):
     """ea from int, explicit 0x/0n number, a symbol name, an import name
-    (-> its IAT slot), or bare-hex fallback."""
+    (-> its IAT slot), a case-folded or demangled name, or bare-hex fallback."""
     import ida_idaapi
     import ida_name
 
@@ -121,6 +166,8 @@ def resolve_target(value):
     ea = ida_name.get_name_ea(ida_idaapi.BADADDR, s)
     if ea == ida_idaapi.BADADDR:
         ea = import_ea(s)
+    if ea == ida_idaapi.BADADDR:
+        ea = scan_names(s)
     if ea != ida_idaapi.BADADDR:
         return ea
     try:
