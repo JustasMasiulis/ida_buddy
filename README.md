@@ -107,7 +107,7 @@ idb --idb C:\bins\foo.exe save
 idb close --no-save          # discard a bad session instead of persisting it
 
 # Database overview and symbols
-idb segments --total
+idb segments
 idb funcs Create -n 50 --total
 idb imports kernel32
 idb exports

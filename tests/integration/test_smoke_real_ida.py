@@ -937,3 +937,16 @@ def test_enum_extend_unsigned_high_value(client):
     assert typ["size"] == 4
     assert _member_values(typ) == {"A": 1, "HI_EXT": 0x9C402000}
     assert _member_values(typ)["HI_EXT"] != 0xFFFFFFFF9C402000
+
+
+def test_free_totals_always_reported(client):
+    _, meta = ok(client, "segments", {})
+    assert meta and meta["total"] == meta["shown"] >= 1
+    _, meta = ok(client, "funcs", {"count": 1})
+    assert meta and meta["total"] >= 1  # unfiltered: constant-time count, no --total needed
+    reply = client.call("decompile", {"func": hex(_entry_ea(client))}, timeout_ms=60000)
+    if protocol.is_ok(reply):  # the full pseudocode is in memory, so its length is free
+        meta = reply["meta"]
+        assert meta["total"] >= len(reply["result"]["lines"]) == meta["shown"]
+
+

@@ -130,8 +130,10 @@ _PAGE_UNITS = {
     "string": "text chars (default 4096)",
     "sessions": "rows", "doctor": "rows",
 }
-_TOTAL_CMDS = frozenset({"segments", "funcs", "imports", "exports", "strings", "names", "type",
-                         "audit_call_types"})
+# Commands whose total is free (already in memory or a constant-time IDA query)
+# always report it. `--total` only matters for these listings, where a pattern
+# filter would need a second full scan to count.
+_TOTAL_CMDS = frozenset({"funcs", "imports", "exports", "strings", "names", "type"})
 
 
 def _session_flags():
@@ -154,7 +156,7 @@ def _global_flags():
     g.add_argument("-n", "--count", type=int, default=argparse.SUPPRESS,
                    help="item/insn/cell count")
     g.add_argument("--total", action="store_true", default=argparse.SUPPRESS,
-                   help="compute total counts when possible")
+                   help="count a filtered listing too (extra scan); free totals always print")
     return g
 
 
@@ -165,7 +167,7 @@ def _add_flags(sp, name):
     sp.add_argument("-n", "--count", type=int, default=argparse.SUPPRESS,
                     help=_PAGE_UNITS[name] if paged else argparse.SUPPRESS)
     sp.add_argument("--total", action="store_true", default=argparse.SUPPRESS,
-                    help="also report the full count (extra scan)"
+                    help="count a filtered listing too (extra scan); unfiltered totals are free"
                          if name in _TOTAL_CMDS else argparse.SUPPRESS)
 
 _ROOT_DESCRIPTION = (
@@ -181,7 +183,7 @@ _ROOT_EPILOG = (
     "  addresses    0x401000, a name (sub_401000), or an expression\n"
     "  pagination   -o/--offset + -n/--count; a [+more; resume with -o N] hint follows a cut page;\n"
     "  output       everything (data, banners, warnings, errors) prints to stdout; exit code signals failure\n"
-    "               --total adds full counts where supported (see each command's -h)\n"
+    "               [total N] prints whenever the count is free; --total also counts a filtered listing (extra scan)\n"
     "  mutations    [mut] commands modify the database; undo/redo revert them"
 )
 
@@ -232,7 +234,7 @@ def build_parser():
                     help="discard unsaved changes instead of persisting them")
     cmd("doctor", help="probe the environment", ex=("doctor",))
 
-    cmd("segments", help="segments + rwx", ex=("segments --total",))
+    cmd("segments", help="segments + rwx", ex=("segments",))
     for name, helptext, example in (
         ("funcs", "functions", "funcs Create -n 50 --total"),
         ("imports", "imports", "imports kernel32"),
@@ -437,7 +439,7 @@ def build_request(ns):
     if c in ("save", "undo", "redo"):
         return c, {}
     if c == "segments":
-        return c, _lpage(ns)
+        return c, _page(ns)
     if c in ("funcs", "imports", "exports", "strings", "names"):
         return c, {"pattern": ns.pattern, **_lpage(ns)}
     if c == "nearest":
@@ -470,7 +472,7 @@ def build_request(ns):
                    "min_sites": ns.min_sites, "min_callers": ns.min_callers,
                    "no_imports": bool(getattr(ns, "no_imports", False)),
                    "kind": ns.kind, "show_all": bool(getattr(ns, "show_all", False)),
-                   **_lpage(ns)}
+                   **_page(ns)}
     if c == "strrefs":
         return c, {"pattern": ns.pattern, **_page(ns)}
     if c == "search":
@@ -599,9 +601,10 @@ def cmd_open(ns):
 def _emit_paginated(rows, formatter, ns):
     page, next_offset = _paginate_list(rows, ns.offset, ns.count)
     print(formatter(page))
-    meta = _banner({"shown": len(page), "truncated": True, "next_offset": next_offset}) if next_offset is not None else ""
-    if meta:
-        print(meta)
+    meta = {"shown": len(page), "total": len(rows)}
+    if next_offset is not None:
+        meta.update(truncated=True, next_offset=next_offset)
+    print(_banner(meta))
 
 
 def cmd_sessions(ns):

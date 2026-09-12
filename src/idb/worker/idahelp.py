@@ -263,11 +263,14 @@ def safe_decompile(ea):
     return cfunc
 
 
-def paged(make_gen, offset, count, total=False, default=None):
+def paged(make_gen, offset, count, total=False, default=None, qty=None):
     """Paginate a freshly-built generator and wrap it in the listing envelope.
-    `make_gen` is called once for the page and again (when `total`) for the count,
-    so it must yield a fresh iterator each call. `default` caps an unset `count`."""
+    `qty` is a total the caller already knows in constant time and is always
+    reported. Without it, `total` re-runs `make_gen` to count (a full scan), so
+    `make_gen` must yield a fresh iterator each call. `default` caps an unset
+    `count`."""
     n = count if count else default
     items, next_offset = paginate(make_gen(), offset, n)
-    total_count = sum(1 for _ in make_gen()) if total else None
-    return {"data": items}, page_meta(items, next_offset, total_count)
+    if qty is None and total:
+        qty = sum(1 for _ in make_gen())
+    return {"data": items}, page_meta(items, next_offset, qty)

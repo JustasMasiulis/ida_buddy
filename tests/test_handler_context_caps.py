@@ -100,7 +100,7 @@ def test_decompile_defaults_to_bounded_page(fake_ida_modules, monkeypatch):
     assert len(result["lines"]) == 120
     assert result["lines"][0] == "line 0"
     assert result["lines"][-1] == "line 119"
-    assert meta == {"shown": 120, "truncated": True, "next_offset": 120}
+    assert meta == {"shown": 120, "truncated": True, "next_offset": 120, "total": 130}
 
 
 def test_calls_defaults_to_bounded_callers(fake_ida_modules, monkeypatch):

@@ -92,7 +92,7 @@ def open_summary():
 
 
 @handler("segments")
-def segments(offset=0, count=None, total=False):
+def segments(offset=0, count=None):
     def gen():
         for ea in idautils.Segments():
             s = ida_segment.getseg(ea)
@@ -106,5 +106,4 @@ def segments(offset=0, count=None, total=False):
             }
 
     items, next_offset = idahelp.paginate(gen(), offset, count)
-    total_count = ida_segment.get_segm_qty() if total else None
-    return {"data": items}, idahelp.page_meta(items, next_offset, total_count)
+    return {"data": items}, idahelp.page_meta(items, next_offset, ida_segment.get_segm_qty())

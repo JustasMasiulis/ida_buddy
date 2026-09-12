@@ -98,22 +98,24 @@ def type_(name, addr=None, offset=0, count=None):
     if tif.is_union() or tif.is_struct():
         base = idahelp.resolve_target(addr) if addr is not None else None
         effective_count = count if count is not None else _TYPE_MEMBER_DEFAULT
-        members, next_offset = idahelp.paginate(_udt_members(tif), offset, effective_count)
+        all_members = _udt_members(tif)
+        members, next_offset = idahelp.paginate(all_members, offset, effective_count)
         if base is not None:
             for m in members:
                 m["value"] = _read_value(base + m["offset"], m["size"])
         result["members"] = members
         result["is_union"] = tif.is_union()
         result["addr"] = base
-        return result, idahelp.page_meta(members, next_offset)
+        return result, idahelp.page_meta(members, next_offset, len(all_members))
     if addr is not None:
         raise IdbError(protocol.BAD_ARGS,
                        f"value overlay requires a struct or union, not {result['kind']}")
     if tif.is_enum():
         effective_count = count if count is not None else _TYPE_MEMBER_DEFAULT
-        members, next_offset = idahelp.paginate(_enum_members(tif), offset, effective_count)
+        all_members = _enum_members(tif)
+        members, next_offset = idahelp.paginate(all_members, offset, effective_count)
         result["members"] = members
-        return result, idahelp.page_meta(members, next_offset)
+        return result, idahelp.page_meta(members, next_offset, len(all_members))
     return result
 
 
@@ -256,7 +258,8 @@ def member(type, offset, page_offset=0, count=None):
     if not paths:
         raise IdbError(protocol.NOT_FOUND, f"no member spans byte offset {off} of {type!r}")
     items, next_offset = idahelp.paginate(paths, page_offset, count)
-    return {"type": type, "offset": off, "paths": items}, idahelp.page_meta(items, next_offset)
+    return ({"type": type, "offset": off, "paths": items},
+            idahelp.page_meta(items, next_offset, len(paths)))
 
 
 def _typeof_lvar(func, var):
@@ -317,10 +320,11 @@ def frame(func, offset=0, count=None):
     ftif = T.tinfo_t()
     if not ftif.get_func_frame(f):
         raise IdbError(protocol.IDA_ERROR, f"no stack frame for {func!r}")
-    members, next_offset = idahelp.paginate(_udt_members(ftif), offset, count)
+    all_members = _udt_members(ftif)
+    members, next_offset = idahelp.paginate(all_members, offset, count)
     return ({"func": ida_funcs.get_func_name(f.start_ea), "ea": f.start_ea,
              "size": ftif.get_size(), "members": members},
-            idahelp.page_meta(members, next_offset))
+            idahelp.page_meta(members, next_offset, len(all_members)))
 
 
 def _parse_type(spec):

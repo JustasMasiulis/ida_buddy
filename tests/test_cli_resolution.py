@@ -54,7 +54,7 @@ def test_sessions_paginates_discovered_rows(monkeypatch, capsys):
     captured = capsys.readouterr()
     lines = captured.out.splitlines()
     assert lines[1].split()[0] == "b"
-    assert lines[-1] == "[+more; resume with -o 2]"
+    assert lines[-1] == "[+more; resume with -o 2] [total 3]"
     assert captured.err == ""
 
 
@@ -164,7 +164,7 @@ def test_command_flags_override_globals():
 @pytest.mark.parametrize(
     ("argv", "expected_cmd", "expected_args"),
     [
-        (["segments"], "segments", {"offset": 8, "count": 4, "total": False}),
+        (["segments"], "segments", {"offset": 8, "count": 4}),
         (["funcs"], "funcs", {"pattern": None, "offset": 8, "count": 4, "total": False}),
         (["imports"], "imports", {"pattern": None, "offset": 8, "count": 4, "total": False}),
         (["exports"], "exports", {"pattern": None, "offset": 8, "count": 4, "total": False}),

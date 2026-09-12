@@ -3,6 +3,7 @@
 import ida_entry
 import ida_funcs
 import ida_nalt
+import ida_name
 import idautils
 
 from idb.worker import idahelp
@@ -11,8 +12,10 @@ from idb.worker.dispatch import handler
 _LIST_DEFAULT = 200
 
 
-def _result(make_gen, offset, count, total=False):
-    return idahelp.paged(make_gen, offset, count, total, default=_LIST_DEFAULT)
+def _result(make_gen, offset, count, total=False, qty=None):
+    """Unfiltered listings know their size in constant time (`qty`) and always
+    report it; a pattern filter needs a full scan, which stays opt-in via `total`."""
+    return idahelp.paged(make_gen, offset, count, total, default=_LIST_DEFAULT, qty=qty)
 
 
 @handler("funcs")
@@ -26,7 +29,8 @@ def funcs(pattern=None, offset=0, count=None, total=False):
                 f = ida_funcs.get_func(ea)
                 yield {"ea": ea, "name": name, "size": (f.end_ea - f.start_ea) if f else 0}
 
-    return _result(gen, offset, count, total)
+    return _result(gen, offset, count, total,
+                   qty=ida_funcs.get_func_qty() if pattern is None else None)
 
 
 @handler("names")
@@ -38,7 +42,8 @@ def names(pattern=None, offset=0, count=None, total=False):
             if pred(name):
                 yield {"ea": ea, "name": name}
 
-    return _result(gen, offset, count, total)
+    return _result(gen, offset, count, total,
+                   qty=ida_name.get_nlist_size() if pattern is None else None)
 
 
 @handler("strings")
@@ -51,7 +56,9 @@ def strings(pattern=None, offset=0, count=None, total=False):
             if pred(text):
                 yield {"ea": s.ea, "length": s.length, "text": text}
 
-    return _result(gen, offset, count, total)
+    # Strings() rebuilds the string list on construction; its size is then free.
+    return _result(gen, offset, count, total,
+                   qty=idautils.Strings().size if pattern is None else None)
 
 
 @handler("imports")
@@ -86,7 +93,8 @@ def exports(pattern=None, offset=0, count=None, total=False):
             if pred(name):
                 yield {"ea": ida_entry.get_entry(ordn), "name": name, "ordinal": ordn}
 
-    return _result(gen, offset, count, total)
+    return _result(gen, offset, count, total,
+                   qty=ida_entry.get_entry_qty() if pattern is None else None)
 
 
 @handler("nearest")

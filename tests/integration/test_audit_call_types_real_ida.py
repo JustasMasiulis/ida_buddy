@@ -98,7 +98,7 @@ def test_scope_narrows_corpus(session):
 
 def test_total_banner(session):
     env = session["env"]
-    res = _run(env, "audit_call_types", "--total", "-n", "1", "--budget", "8", "-t", "120", timeout=180)
+    res = _run(env, "audit_call_types", "-n", "1", "--budget", "8", "-t", "120", timeout=180)
     head = _header(res.stdout)
     m = re.search(r"\[total (\d+)\]", res.stdout)
     if head["findings"] >= 1:

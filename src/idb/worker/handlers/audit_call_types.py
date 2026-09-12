@@ -128,8 +128,7 @@ def _local_findings(cfunc, f_ea, evidence, thr):
 
 @handler("audit_call_types")
 def audit_call_types(scope=None, budget=None, limit=None, min_sites=None, min_callers=None,
-                     no_imports=False, kind="all", show_all=False, offset=0, count=None,
-                     total=False):
+                     no_imports=False, kind="all", show_all=False, offset=0, count=None):
     if not hexcalls.init():
         raise IdbError(protocol.IDA_ERROR, "Hex-Rays decompiler is required for audit_call_types")
     import ida_hexrays
@@ -220,7 +219,7 @@ def audit_call_types(scope=None, budget=None, limit=None, min_sites=None, min_ca
         "truncated": truncated,
         "findings": page,
     }
-    meta = idahelp.page_meta(page, next_off, total=len(ranked) if total else None)
+    meta = idahelp.page_meta(page, next_off, total=len(ranked))
     if truncated:
         meta = dict(meta or {})
         meta["warning"] = (

@@ -74,3 +74,19 @@ def test_paged_total_rebuilds_generator():
 def test_paged_no_truncation_no_meta():
     result, meta = idahelp.paged(lambda: iter([1, 2]), 0, None)
     assert result == {"data": [1, 2]} and meta is None
+
+
+def test_paged_known_qty_is_reported_without_a_second_scan():
+    calls = []
+
+    def make_gen():
+        calls.append(1)
+        return iter(range(5))
+
+    result, meta = idahelp.paged(make_gen, 0, 2, total=True, qty=5)
+    assert result == {"data": [0, 1]} and meta == {"shown": 2, "truncated": True, "next_offset": 2, "total": 5}
+    assert len(calls) == 1  # qty short-circuits the counting pass
+    result, meta = idahelp.paged(make_gen, 0, None, qty=5)
+    assert result == {"data": [0, 1, 2, 3, 4]} and meta == {"shown": 5, "total": 5}
+
+

@@ -71,7 +71,7 @@ def decompile(func, offset=0, count=None):
     idahelp.require_hexrays("Hex-Rays decompiler is not available (no license)")
     f = idahelp.require_func(func)
     cfunc = idahelp.safe_decompile(f.start_ea)
-    lines = (ida_lines.tag_remove(sl.line) for sl in cfunc.get_pseudocode())
+    lines = [ida_lines.tag_remove(sl.line) for sl in cfunc.get_pseudocode()]
     items, next_offset = idahelp.paginate(lines, offset, count if count else _DECOMP_DEFAULT)
     return ({"func": ida_funcs.get_func_name(f.start_ea), "ea": f.start_ea, "lines": items},
-            idahelp.page_meta(items, next_offset))
+            idahelp.page_meta(items, next_offset, len(lines)))
