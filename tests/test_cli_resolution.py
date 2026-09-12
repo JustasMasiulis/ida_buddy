@@ -279,39 +279,61 @@ def test_setlvar_resolution():
 
 
 def test_set_member_resolution():
-    assert _request(["set_member", "Foo", "a", "int", "count"]) == (
+    assert _request(["set_member", "Foo", "int", "--name", "a", "--rename", "count"]) == (
         "set_member",
-        {"type": "Foo", "member": "a", "new_type": "int", "new_name": "count"},
+        {"type": "Foo", "new_type": "int", "new_name": "count", "name": "a", "at": None, "index": None},
     )
-    assert _request(["set_member", "Foo", "0x4", "int"]) == (
+    assert _request(["set_member", "Foo", "int", "--at", "0x4"]) == (
         "set_member",
-        {"type": "Foo", "member": "0x4", "new_type": "int", "new_name": None},
+        {"type": "Foo", "new_type": "int", "new_name": None, "name": None, "at": "0x4", "index": None},
     )
+    assert _request(["set_member", "Foo", "int", "--index", "2"]) == (
+        "set_member",
+        {"type": "Foo", "new_type": "int", "new_name": None, "name": None, "at": None, "index": 2},
+    )
+
+
+@pytest.mark.parametrize("argv", [
+    ["set_member", "Foo", "a", "int"],                       # bare selector: no guessing
+    ["set_member", "Foo", "int", "--name", "a", "--at", "4"],  # two selectors
+    ["del_member", "Foo", "b"],
+    ["union-select", "0x401000", "arm"],
+    ["union-select", "0x401000", "--at", "0"],                # unions have no offsets
+])
+def test_member_selector_must_be_explicit(argv, capsys):
+    with pytest.raises(SystemExit) as exc:
+        cli.build_parser().parse_args(argv)
+    assert exc.value.code == 2
+    assert capsys.readouterr().out
 
 
 def test_insert_member_resolution():
     assert _request(["insert_member", "Foo", "int", "count", "--after", "a"]) == (
         "insert_member",
-        {"type": "Foo", "new_type": "int", "name": "count", "before": None, "after": "a"},
+        {"type": "Foo", "new_type": "int", "name": "count", "before": None, "after": "a", "at": None},
     )
     assert _request(["insert_member", "Foo", "int", "count", "--before", "c"]) == (
         "insert_member",
-        {"type": "Foo", "new_type": "int", "name": "count", "before": "c", "after": None},
+        {"type": "Foo", "new_type": "int", "name": "count", "before": "c", "after": None, "at": None},
+    )
+    assert _request(["insert_member", "Foo", "int", "count", "--at", "0x10"]) == (
+        "insert_member",
+        {"type": "Foo", "new_type": "int", "name": "count", "before": None, "after": None, "at": "0x10"},
     )
     assert _request(["insert_member", "Foo", "void *", "ctx"]) == (
         "insert_member",
-        {"type": "Foo", "new_type": "void *", "name": "ctx", "before": None, "after": None},
+        {"type": "Foo", "new_type": "void *", "name": "ctx", "before": None, "after": None, "at": None},
     )
 
 
 def test_del_member_resolution():
-    assert _request(["del_member", "Foo", "b"]) == (
+    assert _request(["del_member", "Foo", "--name", "b"]) == (
         "del_member",
-        {"type": "Foo", "member": "b", "leave_gap": False},
+        {"type": "Foo", "leave_gap": False, "name": "b", "at": None, "index": None},
     )
-    assert _request(["del_member", "Foo", "0x8", "--leave-gap"]) == (
+    assert _request(["del_member", "Foo", "--at", "0x8", "--leave-gap"]) == (
         "del_member",
-        {"type": "Foo", "member": "0x8", "leave_gap": True},
+        {"type": "Foo", "leave_gap": True, "name": None, "at": "0x8", "index": None},
     )
 
 

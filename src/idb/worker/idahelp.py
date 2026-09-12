@@ -14,22 +14,30 @@ from idb.errors import AMBIGUOUS, IdbError
 _SENTINEL = object()
 
 
-def parse_addr(value):
-    """int | '0x..' hex | '0n..' decimal | bare hex (windbg default). No symbols."""
+def parse_int(value, hex_default, what="number", code=protocol.BAD_ARGS):
+    """The one integer syntax for every numeric argument: `0x` is hex, `0n` is
+    decimal, and bare digits follow `hex_default` (True for addresses, byte
+    offsets, sizes and immediates; False for counts, indexes and enum values).
+    Ints pass through. Negative or malformed text raises `code`."""
     if isinstance(value, int):
         return value
     s = str(value).strip()
-    try:
-        low = s.lower()
-        if low.startswith("0x"):
-            return int(s, 16)
-        if low.startswith("0n"):
-            return int(s[2:], 10)
-        if re.fullmatch(r"[0-9a-fA-F]+", s):
-            return int(s, 16)
-    except ValueError:
-        pass
-    raise IdbError(protocol.BAD_ADDRESS, f"cannot parse address: {value!r}")
+    low = s.lower()
+    if low.startswith("0x"):
+        digits, base = s[2:], 16
+    elif low.startswith("0n"):
+        digits, base = s[2:], 10
+    else:
+        digits, base = s, (16 if hex_default else 10)
+    if not re.fullmatch(r"[0-9a-fA-F]+" if base == 16 else r"[0-9]+", digits):
+        bare = "bare hex" if hex_default else "decimal"
+        raise IdbError(code, f"{what} must be {bare}, 0x<hex>, or 0n<decimal>, not {value!r}")
+    return int(digits, base)
+
+
+def parse_addr(value):
+    """Numeric address: bare hex (windbg default), 0x hex, or 0n decimal. No symbols."""
+    return parse_int(value, hex_default=True, what="address", code=protocol.BAD_ADDRESS)
 
 
 def paginate(iterable, offset=0, count=None):

@@ -16,6 +16,7 @@ import sys
 from idb import __version__, nexus, protocol
 from idb import doctor as doctor_mod
 from idb.errors import IdbError, exit_code_for, AMBIGUOUS, NO_SESSION
+from idb.worker.idahelp import parse_int  # pure: imports no ida_* at module level
 from idb.fmt import (
     listing,
     disasm as fmt_disasm,
@@ -137,23 +138,23 @@ _TOTAL_CMDS = frozenset({"funcs", "imports", "exports", "strings", "names", "typ
 
 
 def _count(text):
-    """argparse type for counts/offsets/depths: bare digits are DECIMAL (unlike
-    addresses), `0x` forces hex and `0n` forces decimal, matching the prefixes
-    accepted everywhere else. Negative values are rejected."""
-    s = text.strip()
-    low = s.lower()
+    """argparse type for counts/offsets/depths/indexes: bare digits are DECIMAL
+    (unlike addresses); `0x` forces hex and `0n` forces decimal."""
     try:
-        if low.startswith("0x"):
-            value = int(s[2:], 16)
-        elif low.startswith("0n"):
-            value = int(s[2:], 10)
-        else:
-            value = int(s, 10)
-    except ValueError:
-        raise argparse.ArgumentTypeError(f"expected a decimal, 0x hex, or 0n decimal number, not {text!r}")
-    if value < 0:
-        raise argparse.ArgumentTypeError(f"must not be negative: {text!r}")
-    return value
+        return parse_int(text, hex_default=False, what="count")
+    except IdbError as exc:
+        raise argparse.ArgumentTypeError(exc.message)
+
+
+def _member_selector(sp, what="member", offsets=True):
+    """Exactly one of --name / --at / --index picks a struct member or union arm;
+    an implicit name-or-offset guess is not offered."""
+    g = sp.add_mutually_exclusive_group(required=True)
+    g.add_argument("--name", metavar="NAME", help=f"{what} by name")
+    if offsets:
+        g.add_argument("--at", metavar="OFF", help=f"{what} at byte offset (bare hex; 0n for decimal)")
+    g.add_argument("--index", metavar="I", type=_count, help=f"{what} by 0-based ordinal")
+
 
 def _session_flags():
     g = argparse.ArgumentParser(add_help=False)
@@ -377,22 +378,26 @@ def build_parser():
     sp.add_argument("--name", default=None)
     sp.add_argument("--type", dest="type", default=None)
     sp = cmd("set_member", help="retype/rename an existing struct member [mut]",
-             ex=("set_member Foo a int count",))
+             ex=("set_member Foo int --name a --rename count", "set_member Foo void* --at 0x10"))
     sp.add_argument("type")
-    sp.add_argument("member")
     sp.add_argument("new_type")
-    sp.add_argument("new_name", nargs="?", default=None)
-    sp = cmd("insert_member", help="add a struct member before/after another, else append [mut]",
-             ex=("insert_member Foo int count --after a", "insert_member Foo void *ctx"))
+    _member_selector(sp)
+    sp.add_argument("--rename", metavar="NEW_NAME", default=None)
+    sp = cmd("insert_member", help="add a struct member before/after/at another, else append [mut]",
+             ex=("insert_member Foo int count --after a", "insert_member Foo int flags --at 0x10",
+                 "insert_member Foo void *ctx"))
     sp.add_argument("type")
     sp.add_argument("new_type")
     sp.add_argument("name")
-    sp.add_argument("--before", default=None)
-    sp.add_argument("--after", default=None)
+    g = sp.add_mutually_exclusive_group()
+    g.add_argument("--before", metavar="NAME", default=None, help="insert before this member")
+    g.add_argument("--after", metavar="NAME", default=None, help="insert after this member")
+    g.add_argument("--at", metavar="OFF", default=None,
+                   help="insert before the member at this byte offset (bare hex; 0n for decimal)")
     sp = cmd("del_member", help="remove a struct member, closing the gap [mut]",
-             ex=("del_member Foo b", "del_member Foo 0x8 --leave-gap"))
+             ex=("del_member Foo --name b", "del_member Foo --at 0x8 --leave-gap"))
     sp.add_argument("type")
-    sp.add_argument("member")
+    _member_selector(sp)
     sp.add_argument("--leave-gap", dest="leave_gap", action="store_true")
     sp = cmd("enum", help="create/extend an enum [mut]", ex=("enum Color r=0,g=1,b=2",))
     sp.add_argument("name")
@@ -405,9 +410,9 @@ def build_parser():
     cmd("undo", help="revert last mutation [mut]", ex=("undo",))
     cmd("redo", help="replay [mut]", ex=("redo",))
     sp = cmd("union-select", help="choose a union arm at a usage site [mut]",
-             ex=("union-select 0x401037 arm_name",))
+             ex=("union-select 0x401037 --name arm_name", "union-select 0x401037 --index 2"))
     sp.add_argument("addr")
-    sp.add_argument("member")
+    _member_selector(sp, what="arm", offsets=False)
     return p
 
 
@@ -528,18 +533,20 @@ def build_request(ns):
     if c == "setlvar":
         return c, {"func": ns.func, "var": ns.var, "name": ns.name, "type": ns.type}
     if c == "set_member":
-        return c, {"type": ns.type, "member": ns.member, "new_type": ns.new_type, "new_name": ns.new_name}
+        return c, {"type": ns.type, "new_type": ns.new_type, "new_name": ns.rename,
+                   "name": ns.name, "at": ns.at, "index": ns.index}
     if c == "insert_member":
         return c, {"type": ns.type, "new_type": ns.new_type, "name": ns.name,
-                   "before": ns.before, "after": ns.after}
+                   "before": ns.before, "after": ns.after, "at": ns.at}
     if c == "del_member":
-        return c, {"type": ns.type, "member": ns.member, "leave_gap": ns.leave_gap}
+        return c, {"type": ns.type, "leave_gap": ns.leave_gap,
+                   "name": ns.name, "at": ns.at, "index": ns.index}
     if c == "enum":
         return c, {"name": ns.name, "members": ns.members, "bitfield": ns.bitfield}
     if c == "patch":
         return c, {"addr": ns.addr, "hex": ns.hex}
     if c == "union-select":
-        return "union_select", {"addr": ns.addr, "member": ns.member}
+        return "union_select", {"addr": ns.addr, "name": ns.name, "index": ns.index}
     raise IdbError(protocol.BAD_ARGS, f"unhandled command {c!r}")
 
 

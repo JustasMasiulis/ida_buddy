@@ -63,12 +63,12 @@ Aliases in parens. `[mut]` mutates the database (creates an undo point).
 | `op <addr> <hex\|dec\|oct\|bin\|char\|num\|enum:NAME> [opnum]` *(mut)* | set operand display format |
 | `declare ("<C>" \| --file P \| @P)` *(mut)* | create types |
 | `settype <target> <type>` / `setlvar <func> <var> [--name N] [--type T]` *(mut)* | apply types / rename and retype Hex-Rays locals |
-| `set_member <struct> <off\|name> <type> [newname]` *(mut)* | retype/rename a member; a larger type absorbs the members it now overlaps |
-| `insert_member <struct> <type> <name> [--before M\|--after M]` *(mut)* | add a member (shifts following members down); appends if no anchor |
-| `del_member <struct> <off\|name> [--leave-gap]` *(mut)* | remove a member, closing the gap (`--leave-gap` keeps offsets fixed) |
+| `set_member <struct> <type> (--name N\|--at OFF\|--index I) [--rename NEW]` *(mut)* | retype/rename a member; a larger type absorbs the members it now overlaps |
+| `insert_member <struct> <type> <name> [--before N\|--after N\|--at OFF]` *(mut)* | add a member (shifts following members down); appends if no anchor |
+| `del_member <struct> (--name N\|--at OFF\|--index I) [--leave-gap]` *(mut)* | remove a member, closing the gap (`--leave-gap` keeps offsets fixed) |
 | `enum <name> <k=v,...> [--bitfield]` *(mut)* | create or extend an enum |
 | `patch <addr> <hex>` *(mut)* | patch bytes |
-| `union-select <addr> <member>` *(mut)* | choose a union arm at a Hex-Rays usage site |
+| `union-select <addr> (--name ARM\|--index I)` *(mut)* | choose a union arm at a Hex-Rays usage site |
 | `undo` / `redo` *(mut)* | revert / replay the last mutation |
 
 
@@ -168,14 +168,14 @@ idb declare @types.h
 idb settype 0x140008000 GUID
 idb settype sub_401000:v3 int
 idb setlvar main v0 --name count --type int
-idb set_member Foo a int count
+idb set_member Foo int --name a --rename count
 idb insert_member Foo int count --after a
 idb insert_member Foo "void *" ctx
-idb del_member Foo b
-idb del_member Foo 0x8 --leave-gap
+idb del_member Foo --name b
+idb del_member Foo --at 0x8 --leave-gap
 idb enum Color r=0,g=1,b=2
 idb patch 0x401037 9090
-idb union-select 0x401037 arm_name
+idb union-select 0x401037 --name arm_name
 idb undo
 idb redo
 ```

@@ -90,3 +90,19 @@ def test_paged_known_qty_is_reported_without_a_second_scan():
     assert result == {"data": [0, 1, 2, 3, 4]} and meta == {"shown": 5, "total": 5}
 
 
+@pytest.mark.parametrize("text, hex_default, value", [
+    ("10", True, 16), ("10", False, 10), ("0x10", False, 16), ("0X10", True, 16),
+    ("0n10", True, 10), ("0n10", False, 10), ("ff", True, 255), ("010", False, 10), (7, False, 7),
+])
+def test_parse_int_prefixes_and_default_base(text, hex_default, value):
+    assert idahelp.parse_int(text, hex_default) == value
+
+
+@pytest.mark.parametrize("bad, hex_default", [
+    ("ff", False), ("-1", True), ("1.5", False), ("0x", True), ("0n0x10", False), ("", True), ("0xzz", True),
+])
+def test_parse_int_rejects_bad_arguments(bad, hex_default):
+    with pytest.raises(IdbError) as ei:
+        idahelp.parse_int(bad, hex_default, what="thing")
+    assert ei.value.code == protocol.BAD_ARGS and "thing must be" in ei.value.message
+

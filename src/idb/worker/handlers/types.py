@@ -74,15 +74,6 @@ def _named(name):
     return tif
 
 
-def _parse_int(value):
-    # Member selectors are name-OR-offset: bare digits stay DECIMAL here so a hex-looking
-    # member NAME (e.g. "f0") still falls through to name lookup in _member_index. A byte
-    # offset that wants hex passes the 0x prefix. (The `member` byte_off arg, which is never
-    # a name, uses idahelp.parse_addr instead so it follows the bare-hex address convention.)
-    s = str(value)
-    return int(s, 16) if s.lower().startswith("0x") else int(s, 10)
-
-
 @handler("type")
 def type_(name, addr=None, offset=0, count=None):
     tif = T.tinfo_t()
@@ -122,12 +113,7 @@ def type_(name, addr=None, offset=0, count=None):
 @handler("types")
 def types(pattern=None, kind=None, size=None, offset=0, count=None, total=False):
     name_pred = idahelp.name_filter(pattern)
-    want_size = None
-    if size is not None:
-        try:
-            want_size = idahelp.parse_addr(size)  # bare hex, 0n for decimal (windbg convention)
-        except IdbError:
-            raise IdbError(protocol.BAD_ARGS, f"--size must be an integer: {size!r}")
+    want_size = idahelp.parse_int(size, hex_default=True, what="--size") if size is not None else None
 
     def matches(tif, name):
         if not name or not name_pred(name):
@@ -249,7 +235,7 @@ def _walk(tif, off, prefix, paths, depth=0):
 
 @handler("member")
 def member(type, offset, page_offset=0, count=None):
-    off = idahelp.parse_addr(offset)
+    off = idahelp.parse_int(offset, hex_default=True, what="byte offset")
     tif = _named(type)
     if not (tif.is_struct() or tif.is_union()):
         raise IdbError(protocol.BAD_ARGS, f"{type!r} is not a struct or union")
@@ -454,12 +440,31 @@ def setlvar(func, var, name=None, type=None):
     return {"target": f"{func}:{final_name}", "kind": "lvar", "name": final_name, "type": type_str}
 
 
-def _member_index(tif, member):
-    try:
-        off = _parse_int(member)
-    except ValueError:
-        return tif.find_udm(str(member))
-    return tif.find_udm(off * 8, T.STRMEM_OFFSET | T.STRMEM_SKIP_GAPS)
+def _selector_label(name, at, index):
+    if name is not None:
+        return repr(name)
+    return f"at {at}" if at is not None else f"#{index}"
+
+
+def _select_member(target, name=None, at=None, index=None, what="member"):
+    """Index of the member of `target` (struct or union) picked by exactly one
+    of name / byte offset (`at`, bare hex) / ordinal (`index`, decimal), or -1.
+    Union arms all sit at offset 0, so `at` is rejected for unions."""
+    given = [flag for flag, value in (("--name", name), ("--at", at), ("--index", index))
+             if value is not None]
+    if len(given) != 1:
+        raise IdbError(protocol.BAD_ARGS,
+                       f"pick the {what} with exactly one of --name, --at, --index"
+                       f" (got {', '.join(given) if given else 'none'})")
+    if index is not None:
+        return idahelp.parse_int(index, hex_default=False, what="--index")
+    if at is not None:
+        if target.is_union():
+            raise IdbError(protocol.BAD_ARGS,
+                           "union arms all sit at offset 0; pick one with --name or --index")
+        off = idahelp.parse_int(at, hex_default=True, what="--at")
+        return target.find_udm(off * 8, T.STRMEM_OFFSET | T.STRMEM_SKIP_GAPS)
+    return target.find_udm(str(name))
 
 
 # In-place mutators (rename_udm/set_udm_type/del_udm/add_udm) on a get_named_type()
@@ -504,10 +509,6 @@ def _save_udt(def_name, udt, is_union, type_cmt, repeatable):
         raise IdbError(protocol.IDA_ERROR, f"set_named_type failed: {T.tinfo_errstr(code)}")
 
 
-def _arm_index(target, member, is_union):
-    return _union_arm_ordinal(target, member) if is_union else _member_index(target, member)
-
-
 def _drop_members(udt, first, last):
     """Erase members [first, last] (inclusive) by left-shifting the tail and popping."""
     span = last - first + 1
@@ -519,11 +520,11 @@ def _drop_members(udt, first, last):
 
 
 @handler("set_member", writes=True)
-def set_member(type, member, new_type, new_name=None):
+def set_member(type, new_type, name=None, at=None, index=None, new_name=None):
     def_name, target, udt, type_cmt, repeatable = _load_writable_udt(type)
-    idx = _member_index(target, member)
-    if idx < 0:
-        raise IdbError(protocol.NOT_FOUND, f"no member {member!r} in {type!r}")
+    idx = _select_member(target, name, at, index)
+    if idx < 0 or idx >= udt.size():
+        raise IdbError(protocol.NOT_FOUND, f"no member {_selector_label(name, at, index)} in {type!r}")
     new_tif = _parse_type(new_type)
     width = new_tif.get_size() * 8
     if width <= 0:
@@ -553,9 +554,9 @@ def set_member(type, member, new_type, new_name=None):
 
 
 @handler("insert_member", writes=True)
-def insert_member(type, new_type, name, before=None, after=None):
-    if before is not None and after is not None:
-        raise IdbError(protocol.BAD_ARGS, "insert_member takes at most one of --before/--after")
+def insert_member(type, new_type, name, before=None, after=None, at=None):
+    if sum(anchor is not None for anchor in (before, after, at)) > 1:
+        raise IdbError(protocol.BAD_ARGS, "insert_member takes at most one of --before/--after/--at")
     def_name, target, udt, type_cmt, repeatable = _load_writable_udt(type)
     is_union = target.is_union()
     member = T.udm_t()
@@ -567,15 +568,15 @@ def insert_member(type, new_type, name, before=None, after=None):
     member.size = width
 
     count = udt.size()
-    ref = before if before is not None else after
-    if ref is None:
+    if before is None and after is None and at is None:
         pos = count
         insert_off = 0 if is_union else target.get_size() * 8
     else:
-        idx = _arm_index(target, ref, is_union)
+        anchor = before if before is not None else after
+        idx = _select_member(target, name=anchor, at=at)
         if idx < 0 or idx >= count:
-            raise IdbError(protocol.NOT_FOUND, f"no member {ref!r} in {type!r}")
-        if before is not None:
+            raise IdbError(protocol.NOT_FOUND, f"no member {_selector_label(anchor, at, None)} in {type!r}")
+        if after is None:  # --before NAME and --at OFF both insert in front of the anchor
             pos = idx
             insert_off = 0 if is_union else udt[idx].offset
         else:
@@ -597,13 +598,13 @@ def insert_member(type, new_type, name, before=None, after=None):
 
 
 @handler("del_member", writes=True)
-def del_member(type, member, leave_gap=False):
+def del_member(type, name=None, at=None, index=None, leave_gap=False):
     def_name, target, udt, type_cmt, repeatable = _load_writable_udt(type)
     is_union = target.is_union()
-    idx = _arm_index(target, member, is_union)
+    idx = _select_member(target, name, at, index)
     count = udt.size()
     if idx < 0 or idx >= count:
-        raise IdbError(protocol.NOT_FOUND, f"no member {member!r} in {type!r}")
+        raise IdbError(protocol.NOT_FOUND, f"no member {_selector_label(name, at, index)} in {type!r}")
     removed = udt[idx].name
     width = udt[idx].type.get_size() * 8
     if not is_union and not leave_gap:
@@ -627,7 +628,8 @@ def _parse_enum_members(members):
             continue
         if "=" in chunk:
             key, raw = chunk.split("=", 1)
-            value = int(raw.strip(), 0)
+            value = idahelp.parse_int(raw.strip(), hex_default=False,
+                                      what=f"enum value of {key.strip()!r}")
         else:
             key, value = chunk, nxt
         parsed.append({"name": key.strip(), "value": value})
@@ -676,17 +678,6 @@ def enum(name, members, bitfield=False):
     return {"name": name, "extended": False, "bitfield": bool(bitfield), "members": parsed}
 
 
-def _union_arm_ordinal(union_tif, member):
-    """member as an int (or 0x-int) is the union-arm ordinal directly; otherwise a
-    field name resolved via find_udm. Union arms all share offset 0, so a byte-offset
-    lookup (as set_member uses) is meaningless here. Returns -1 if not an arm."""
-    s = str(member)
-    try:
-        return int(s, 16) if s.lower().startswith("0x") else int(s, 10)
-    except ValueError:
-        return union_tif.find_udm(s)
-
-
 def _addressable_ea(cfunc, item):
     """Walk up from item to the nearest ctree node carrying a real ea. Union access
     expressions are sometimes unaddressable (BADADDR); the decompiler keys a selection
@@ -697,9 +688,13 @@ def _addressable_ea(cfunc, item):
 
 
 @handler("union_select", writes=True)
-def union_select(addr, member):
+def union_select(addr, name=None, index=None):
     import ida_hexrays
     import ida_pro
+
+    if (name is None) == (index is None):
+        raise IdbError(protocol.BAD_ARGS, "pick the arm with exactly one of --name, --index")
+    member = name if name is not None else int(index)
 
     ea = idahelp.resolve_target(addr)
     f = idahelp.require_func(addr, f"no function contains {addr!r}")
@@ -727,7 +722,7 @@ def union_select(addr, member):
         base = T.remove_pointer(e.x.type)
         if not base.is_union():
             continue
-        ordinal = _union_arm_ordinal(base, member)
+        ordinal = _select_member(base, name=name, index=index, what="arm")
         cands.append({"it": it, "base": base, "expr_ea": e.ea,
                       "site_ea": e.ea if e.ea != BADADDR else _addressable_ea(cfunc, it),
                       "ordinal": ordinal, "valid": 0 <= ordinal < len(_udt_members(base))})

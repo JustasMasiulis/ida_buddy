@@ -524,7 +524,7 @@ def test_declare_then_set_member(client):
     ok(client, "declare", {"text": "struct IDB_IT { int a; char b; };"})
     typ, _ = ok(client, "type", {"name": "IDB_IT"})
     assert any(m["name"] == "a" for m in typ["members"])
-    ok(client, "set_member", {"type": "IDB_IT", "member": "a", "new_type": "unsigned int", "new_name": "aa"})
+    ok(client, "set_member", {"type": "IDB_IT", "name": "a", "new_type": "unsigned int", "new_name": "aa"})
     typ2, _ = ok(client, "type", {"name": "IDB_IT"})
     assert any(m["name"] == "aa" and m["type"] == "unsigned int" for m in typ2["members"])
 
@@ -535,7 +535,7 @@ def test_set_member_pure_rename_type_unchanged(client):
     # rides along). Mirrors the exact reported repro, including the typedef indirection.
     ok(client, "declare", {"text": "typedef struct _SM_REPRO { void *old_name; } SM_REPRO;"})
     res, _ = ok(client, "set_member",
-                {"type": "SM_REPRO", "member": "old_name", "new_type": "void *", "new_name": "new_name"})
+                {"type": "SM_REPRO", "name": "old_name", "new_type": "void *", "new_name": "new_name"})
     assert res["name"] == "new_name"
     typ, _ = ok(client, "type", {"name": "SM_REPRO"})
     names = [m["name"] for m in typ["members"]]
@@ -547,7 +547,7 @@ def test_set_member_pure_rename_type_unchanged(client):
 def test_set_member_rename_by_offset(client):
     ok(client, "declare", {"text": "struct SM_OFF { void *first; int second; };"})
     ok(client, "set_member",
-       {"type": "SM_OFF", "member": "0x0", "new_type": "void *", "new_name": "renamed_first"})
+       {"type": "SM_OFF", "at": "0x0", "new_type": "void *", "new_name": "renamed_first"})
     typ, _ = ok(client, "type", {"name": "SM_OFF"})
     by_off = {m["offset"]: m["name"] for m in typ["members"]}
     assert by_off[0] == "renamed_first"
@@ -592,7 +592,7 @@ def test_insert_member_append_aligns_pointer(client):
 
 def test_del_member_closes_gap(client):
     ok(client, "declare", {"text": "struct DEL_CL { int a; int b; int c; };"})
-    ok(client, "del_member", {"type": "DEL_CL", "member": "b", "leave_gap": False})
+    ok(client, "del_member", {"type": "DEL_CL", "name": "b", "leave_gap": False})
     by_off = _members_by_off(client, "DEL_CL")
     assert by_off[0][0] == "a" and by_off[4][0] == "c"
     assert all(name != "b" for name, _ in by_off.values())
@@ -600,7 +600,7 @@ def test_del_member_closes_gap(client):
 
 def test_del_member_leave_gap_keeps_offsets(client):
     ok(client, "declare", {"text": "struct DEL_GAP { int a; int b; int c; };"})
-    ok(client, "del_member", {"type": "DEL_GAP", "member": "b", "leave_gap": True})
+    ok(client, "del_member", {"type": "DEL_GAP", "name": "b", "leave_gap": True})
     by_off = _members_by_off(client, "DEL_GAP")
     assert by_off[0][0] == "a" and by_off[8][0] == "c"
     assert 4 not in by_off
@@ -610,7 +610,7 @@ def test_insert_then_del_roundtrips(client):
     ok(client, "declare", {"text": "struct RT_ID { int a; int c; };"})
     ok(client, "insert_member",
        {"type": "RT_ID", "new_type": "int", "name": "b", "before": None, "after": "a"})
-    ok(client, "del_member", {"type": "RT_ID", "member": "b", "leave_gap": False})
+    ok(client, "del_member", {"type": "RT_ID", "name": "b", "leave_gap": False})
     by_off = _members_by_off(client, "RT_ID")
     assert by_off[0][0] == "a" and by_off[4][0] == "c" and 8 not in by_off
 
@@ -622,7 +622,7 @@ def test_insert_and_del_member_on_union(client):
     typ, _ = ok(client, "type", {"name": "UN_ID"})
     assert all(m["offset"] == 0 for m in typ["members"])
     assert any(m["name"] == "p" for m in typ["members"])
-    ok(client, "del_member", {"type": "UN_ID", "member": "c", "leave_gap": False})
+    ok(client, "del_member", {"type": "UN_ID", "name": "c", "leave_gap": False})
     typ2, _ = ok(client, "type", {"name": "UN_ID"})
     names = [m["name"] for m in typ2["members"]]
     assert "c" not in names and "p" in names and "i" in names
@@ -635,7 +635,7 @@ def test_set_member_consumes_following_members(client):
         "struct _US16 { unsigned short Length; unsigned short MaximumLength; wchar_t *Buffer; };"})
     ok(client, "declare", {"text": "struct HASUS { int f0; int f4; void *f8; int f16; };"})
     res, _ = ok(client, "set_member",
-                {"type": "HASUS", "member": "f0", "new_type": "_US16", "new_name": "name"})
+                {"type": "HASUS", "name": "f0", "new_type": "_US16", "new_name": "name"})
     assert res["consumed"] == ["f4", "f8"]
     by_off = _members_by_off(client, "HASUS")
     assert by_off[0][0] == "name" and "_US16" in by_off[0][1]
@@ -646,7 +646,7 @@ def test_set_member_consumes_following_members(client):
 
 def test_set_member_partial_consume_keeps_aligned_survivors(client):
     ok(client, "declare", {"text": "struct CONS { int a; int b; int c; int d; };"})
-    res, _ = ok(client, "set_member", {"type": "CONS", "member": "a", "new_type": "__int64"})
+    res, _ = ok(client, "set_member", {"type": "CONS", "name": "a", "new_type": "__int64"})
     assert res["consumed"] == ["b"]
     by_off = _members_by_off(client, "CONS")
     assert by_off[0][0] == "a" and by_off[8][0] == "c" and by_off[12][0] == "d"
@@ -654,7 +654,7 @@ def test_set_member_partial_consume_keeps_aligned_survivors(client):
 
 def test_set_member_smaller_type_consumes_nothing(client):
     ok(client, "declare", {"text": "struct SHRINK { void *p; int tail; };"})
-    res, _ = ok(client, "set_member", {"type": "SHRINK", "member": "p", "new_type": "int"})
+    res, _ = ok(client, "set_member", {"type": "SHRINK", "name": "p", "new_type": "int"})
     assert res["consumed"] == []
     by_off = _members_by_off(client, "SHRINK")
     assert by_off[0][0] == "p" and any(n == "tail" for n, _ in by_off.values())
@@ -664,8 +664,8 @@ def test_set_member_over_leave_gap_absorbs_hole(client):
     # del --leave-gap pins the struct fixed with a hole at [4,8); a set_member whose new
     # type spans that hole absorbs it without disturbing the field at the footprint end.
     ok(client, "declare", {"text": "struct GAPSET { int a; int b; int c; };"})
-    ok(client, "del_member", {"type": "GAPSET", "member": "b", "leave_gap": True})
-    res, _ = ok(client, "set_member", {"type": "GAPSET", "member": "a", "new_type": "__int64"})
+    ok(client, "del_member", {"type": "GAPSET", "name": "b", "leave_gap": True})
+    res, _ = ok(client, "set_member", {"type": "GAPSET", "name": "a", "new_type": "__int64"})
     assert res["consumed"] == []
     by_off = _members_by_off(client, "GAPSET")
     assert by_off[0][0] == "a" and "__int64" in by_off[0][1]
@@ -676,7 +676,7 @@ def test_set_member_misaligned_type_repacks(client):
     # An 8-byte type assigned to a 4-aligned field of a non-fixed struct gets bumped to the
     # next aligned slot by create_udt; the field it overlapped is still consumed.
     ok(client, "declare", {"text": "struct ALN { char pad; int target; int after; };"})
-    res, _ = ok(client, "set_member", {"type": "ALN", "member": "target", "new_type": "__int64"})
+    res, _ = ok(client, "set_member", {"type": "ALN", "name": "target", "new_type": "__int64"})
     assert res["consumed"] == ["after"]
     by_off = _members_by_off(client, "ALN")
     names = {n for n, _ in by_off.values()}
@@ -689,21 +689,21 @@ def test_grow_a_fixed_struct_after_leave_gap(client):
     # del --leave-gap pins the struct fixed with a stale total_size; a later insert or a
     # set_member that grows past the old end must bump total_size or create_udt rejects it.
     ok(client, "declare", {"text": "struct GROWFIX { int a; int b; int c; int d; };"})
-    ok(client, "del_member", {"type": "GROWFIX", "member": "b", "leave_gap": True})
+    ok(client, "del_member", {"type": "GROWFIX", "name": "b", "leave_gap": True})
     ok(client, "insert_member",
        {"type": "GROWFIX", "new_type": "void *", "name": "ins", "before": None, "after": "d"})
     by_off = _members_by_off(client, "GROWFIX")
     assert by_off[16][0] == "ins"
-    ok(client, "set_member", {"type": "GROWFIX", "member": "a", "new_type": "char[32]"})
+    ok(client, "set_member", {"type": "GROWFIX", "name": "a", "new_type": "char[32]"})
     by_off2 = _members_by_off(client, "GROWFIX")
     assert by_off2[0][0] == "a" and "char[32]" in by_off2[0][1]
 
 
 def test_set_member_at_gap_offset_is_not_found(client):
     ok(client, "declare", {"text": "struct GAPREF { int a; int b; int c; };"})
-    ok(client, "del_member", {"type": "GAPREF", "member": "b", "leave_gap": True})
+    ok(client, "del_member", {"type": "GAPREF", "name": "b", "leave_gap": True})
     reply = client.call("set_member",
-                        {"type": "GAPREF", "member": "0x4", "new_type": "int"}, timeout_ms=20000)
+                        {"type": "GAPREF", "at": "0x4", "new_type": "int"}, timeout_ms=20000)
     assert not protocol.is_ok(reply)
     assert reply["error"]["code"] == protocol.NOT_FOUND
 
@@ -744,7 +744,7 @@ def test_type_masks_declared_enum_sign_extension(client):
 def test_union_select_live_negative(client):
     if not _has_hexrays(client):
         pytest.skip("no Hex-Rays")
-    reply = client.call("union_select", {"addr": hex(_entry_ea(client)), "member": "__no_such_arm__"})
+    reply = client.call("union_select", {"addr": hex(_entry_ea(client)), "name": "__no_such_arm__"})
     assert not protocol.is_ok(reply), reply
     err = reply["error"]
     assert err["code"] in (protocol.NOT_FOUND, protocol.IDA_ERROR)
@@ -757,7 +757,7 @@ def test_union_select_roundtrip(client):
     addr, arm = os.environ.get("IDB_UNION_ADDR"), os.environ.get("IDB_UNION_MEMBER")
     if not (addr and arm):
         pytest.skip("set IDB_UNION_ADDR + IDB_UNION_MEMBER to a known union usage site")
-    res, _ = ok(client, "union_select", {"addr": addr, "member": arm})
+    res, _ = ok(client, "union_select", {"addr": addr, "name": arm})
     assert res["member"] == arm or str(res["ordinal"]) == arm
     assert res["verified"], res
     ok(client, "undo")
