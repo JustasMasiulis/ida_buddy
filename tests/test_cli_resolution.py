@@ -403,3 +403,18 @@ def test_emit_prints_warning_before_data_on_stdout(capsys):
     assert captured.out.splitlines() == ["idb: warning: 0x2000 is typed ANSI_STRING; use `ds`",
                                          '2000  ANSI_STRING len=3 max=4 buf=3000  "abc"']
     assert captured.err == ""
+
+
+@pytest.mark.parametrize("text, value", [("20", 20), ("0x10", 16), ("0X10", 16), ("0n16", 16), ("0", 0)])
+def test_count_flags_default_decimal_with_prefixes(text, value):
+    ns = cli.build_parser().parse_args(["funcs", "-n", text, "-o", text])
+    assert (ns.count, ns.offset) == (value, value)
+    assert cli.build_parser().parse_args(["calls", "main", "--depth", text]).depth == value
+
+
+@pytest.mark.parametrize("bad", ["zz", "0xzz", "-1", "1.5", "0n0x10"])
+def test_count_flags_reject_garbage(bad, capsys):
+    with pytest.raises(SystemExit) as exc:
+        cli.build_parser().parse_args(["funcs", "-n", bad])
+    assert exc.value.code == 2
+    assert "argument -n/--count" in capsys.readouterr().out

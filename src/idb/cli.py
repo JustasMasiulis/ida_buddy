@@ -136,6 +136,25 @@ _PAGE_UNITS = {
 _TOTAL_CMDS = frozenset({"funcs", "imports", "exports", "strings", "names", "type"})
 
 
+def _count(text):
+    """argparse type for counts/offsets/depths: bare digits are DECIMAL (unlike
+    addresses), `0x` forces hex and `0n` forces decimal, matching the prefixes
+    accepted everywhere else. Negative values are rejected."""
+    s = text.strip()
+    low = s.lower()
+    try:
+        if low.startswith("0x"):
+            value = int(s[2:], 16)
+        elif low.startswith("0n"):
+            value = int(s[2:], 10)
+        else:
+            value = int(s, 10)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected a decimal, 0x hex, or 0n decimal number, not {text!r}")
+    if value < 0:
+        raise argparse.ArgumentTypeError(f"must not be negative: {text!r}")
+    return value
+
 def _session_flags():
     g = argparse.ArgumentParser(add_help=False)
     g.add_argument("-s", "--session", default=argparse.SUPPRESS,
@@ -151,9 +170,9 @@ def _session_flags():
 
 def _global_flags():
     g = _session_flags()
-    g.add_argument("-o", "--offset", type=int, default=argparse.SUPPRESS,
+    g.add_argument("-o", "--offset", type=_count, default=argparse.SUPPRESS,
                    help="pagination offset")
-    g.add_argument("-n", "--count", type=int, default=argparse.SUPPRESS,
+    g.add_argument("-n", "--count", type=_count, default=argparse.SUPPRESS,
                    help="item/insn/cell count")
     g.add_argument("--total", action="store_true", default=argparse.SUPPRESS,
                    help="count a filtered listing too (extra scan); free totals always print")
@@ -162,9 +181,9 @@ def _global_flags():
 
 def _add_flags(sp, name):
     paged = name in _PAGE_UNITS
-    sp.add_argument("-o", "--offset", type=int, default=argparse.SUPPRESS,
+    sp.add_argument("-o", "--offset", type=_count, default=argparse.SUPPRESS,
                     help="pagination offset" if paged else argparse.SUPPRESS)
-    sp.add_argument("-n", "--count", type=int, default=argparse.SUPPRESS,
+    sp.add_argument("-n", "--count", type=_count, default=argparse.SUPPRESS,
                     help=_PAGE_UNITS[name] if paged else argparse.SUPPRESS)
     sp.add_argument("--total", action="store_true", default=argparse.SUPPRESS,
                     help="count a filtered listing too (extra scan); unfiltered totals are free"
@@ -180,7 +199,8 @@ _ROOT_DESCRIPTION = (
 )
 _ROOT_EPILOG = (
     "conventions:\n"
-    "  addresses    0x401000, a name (sub_401000), or an expression\n"
+    "  addresses    0x401000, a name (sub_401000), or an expression; bare digits are hex\n"
+    "  counts       -n/-o/--depth/--limit: bare digits are decimal; 0x forces hex, 0n forces decimal\n"
     "  pagination   -o/--offset + -n/--count; a [+more; resume with -o N] hint follows a cut page;\n"
     "  output       everything (data, banners, warnings, errors) prints to stdout; exit code signals failure\n"
     "               [total N] prints whenever the count is free; --total also counts a filtered listing (extra scan)\n"
@@ -277,7 +297,7 @@ def build_parser():
     sp.add_argument("-d", "--direction", choices=("to", "from", "both"), default=None)
     sp = cmd("calls", help="callers + callees", ex=("calls sub_401000", "calls main --depth 3"))
     sp.add_argument("func")
-    sp.add_argument("--depth", type=int, default=1, help="expand callers upward N levels")
+    sp.add_argument("--depth", type=_count, default=1, help="expand callers upward N levels")
     sp = cmd("triage", help="single-function pre-RE summary: callees, groups, SEH, strings",
              ex=("triage sub_401000",))
     sp.add_argument("func")
@@ -287,10 +307,10 @@ def build_parser():
     sp.add_argument("scope", nargs="?", default=None,
                     help="name pattern to narrow the audit (default: whole database)")
     sp.add_argument("--budget", type=float, default=None, help="wall-clock budget, seconds (default 20)")
-    sp.add_argument("--limit", type=int, default=None, help="max functions to decompile (default 400)")
-    sp.add_argument("--min-sites", dest="min_sites", type=int, default=None,
+    sp.add_argument("--limit", type=_count, default=None, help="max functions to decompile (default 400)")
+    sp.add_argument("--min-sites", dest="min_sites", type=_count, default=None,
                     help="min call sites for a param finding (default 3)")
-    sp.add_argument("--min-callers", dest="min_callers", type=int, default=None,
+    sp.add_argument("--min-callers", dest="min_callers", type=_count, default=None,
                     help="min distinct callers for a param finding (default 2)")
     sp.add_argument("--no-imports", dest="no_imports", action="store_true",
                     help="exclude import/library callees from findings")
@@ -341,7 +361,7 @@ def build_parser():
              ex=("op 0x401234 dec", "op 0x401234 enum:MyFlags 1"))
     sp.add_argument("addr")
     sp.add_argument("fmt", metavar="<hex|dec|oct|bin|char|num|enum:NAME>")
-    sp.add_argument("opnum", nargs="?", type=int, default=None)
+    sp.add_argument("opnum", nargs="?", type=_count, default=None)
     sp = cmd("declare", help='create types: "<C>" | --file P | @P [mut]',
              ex=('declare "struct Foo { int a; char b; };"', "declare @types.h"))
     sp.add_argument("decl", nargs="?", default=None)
