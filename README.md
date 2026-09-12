@@ -182,7 +182,9 @@ idb redo
 
 Global flags: `-s/--session`, `--idb`, `-o/--offset`, `-n/--count`, `-t/--timeout`,
 `--total`, `-v/--verbose`. Addresses are hex by default (windbg style); `0n`
-prefixes decimal; a symbol name resolves to its address.
+prefixes decimal; a symbol name resolves to its address. Lookup is exact
+first, then import names (to their IAT slot), then case-insensitive and
+demangled forms; a name matching several addresses is an error listing them.
 
 **Everything goes to stdout** — data, `[+more]` truncation notices, warnings and
 `idb: <CODE>: <message>` errors — so nothing is lost when only stdout is captured; a

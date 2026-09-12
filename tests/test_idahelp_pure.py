@@ -21,6 +21,24 @@ def test_parse_addr_rejects(bad):
     assert ei.value.code == protocol.BAD_ADDRESS
 
 
+@pytest.mark.parametrize("name, ea", [
+    ("sub_1400278A0", 0x1400278A0),
+    ("sub_1400278a0", 0x1400278A0),
+    ("loc_401037", 0x401037),
+    ("byte_140003000", 0x140003000),
+    ("xmmword_140005000", 0x140005000),
+    ("nullsub_3", None),
+    ("unknown_libname_12", None),
+    ("j_sub_401000", None),
+    ("sub_", None),
+    ("sub_401000x", None),
+    ("MyThing_1234", None),
+    ("401000", None),
+])
+def test_dummy_name_ea(name, ea):
+    assert idahelp.dummy_name_ea(name) == ea
+
+
 def test_paginate_basic():
     assert idahelp.paginate(range(10), 0, 3) == ([0, 1, 2], 3)
     assert idahelp.paginate(range(10), 0, None) == (list(range(10)), None)

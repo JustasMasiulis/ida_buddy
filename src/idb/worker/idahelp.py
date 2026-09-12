@@ -40,6 +40,21 @@ def parse_addr(value):
     return parse_int(value, hex_default=True, what="address", code=protocol.BAD_ADDRESS)
 
 
+# IDA's auto-generated ("dummy") names whose suffix is the address they label:
+# sub_140001000, loc_1400010A0, byte_140003000, ... Counter-suffixed dummies
+# (nullsub_3, unknown_libname_12) carry no address and are excluded.
+_DUMMY_NAME = re.compile(
+    r"(?:sub|loc|locret|off|seg|asc|byte|word|dword|qword|oword|xmmword|ymmword|zmmword"
+    r"|flt|dbl|tbyte|packreal|stru|unk|algn|def|jpt|custdata)_([0-9A-Fa-f]+)")
+
+
+def dummy_name_ea(name):
+    """Address embedded in an IDA dummy name (`sub_1400278A0` -> 0x1400278A0),
+    or None. Lets a dummy name keep resolving after the location is renamed."""
+    m = _DUMMY_NAME.fullmatch(name)
+    return int(m.group(1), 16) if m else None
+
+
 def paginate(iterable, offset=0, count=None):
     """Apply offset/count WHILE walking an iterator (never build-then-cap).
     Returns (items, next_offset); next_offset is None once the source is
@@ -161,8 +176,9 @@ def scan_names(name):
 
 
 def resolve_target(value):
-    """ea from int, explicit 0x/0n number, a symbol name, an import name
-    (-> its IAT slot), a case-folded or demangled name, or bare-hex fallback."""
+    """ea from int, explicit 0x/0n number, a symbol name, a dummy name
+    (`sub_<ea>`, even after the location was renamed), an import name (-> its
+    IAT slot), a case-folded or demangled name, or bare-hex fallback."""
     import ida_idaapi
     import ida_name
 
@@ -173,6 +189,9 @@ def resolve_target(value):
         return parse_addr(s)
     ea = ida_name.get_name_ea(ida_idaapi.BADADDR, s)
     if ea == ida_idaapi.BADADDR:
+        dummy = dummy_name_ea(s)
+        if dummy is not None:
+            return dummy
         ea = import_ea(s)
     if ea == ida_idaapi.BADADDR:
         ea = scan_names(s)

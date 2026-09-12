@@ -249,6 +249,17 @@ def test_resolve_demangled_name(client):
         ok(client, "undo")
 
 
+def test_resolve_dummy_name_after_rename(client):
+    ea = _entry_ea(client)
+    ok(client, "rename", {"addr": hex(ea), "name": "idb_smoke_renamed"})
+    try:
+        for form in (f"sub_{ea:X}", f"sub_{ea:x}", f"loc_{ea:X}"):
+            result, _ = ok(client, "xrefs", {"addr": form})
+            assert result["addr"] == ea, form
+    finally:
+        ok(client, "undo")
+
+
 def _two_named_addresses(client):
     imports, _ = ok(client, "imports", {"count": 2})
     if len(imports["data"]) < 2:
