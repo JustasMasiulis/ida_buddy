@@ -13,30 +13,15 @@ from idb import protocol
 _INITIALIZED = False
 
 
-def _analysis_ready() -> bool:
-    """Non-mutating analysis probe; never enables auto-analysis in the target."""
-    try:
-        import ida_auto
-        import ida_ida
-
-        # Analysis switched off is a settled state, not a pending one:
-        # auto_is_ok() stays False forever, so gating on it alone locks the
-        # database out permanently. Intent lives in IDA's persistent flag --
-        # the runtime analyzer is suspended by ordinary GUI actions and so
-        # cannot distinguish "disabled" from "momentarily paused".
-        return bool(ida_auto.auto_is_ok()) or not ida_ida.inf_is_auto_enabled()
-    except Exception:
-        return True
-
-
 def _load(db) -> bool:
-    """Register handlers against ``db`` and gate readiness. Returns True on the
-    first load in this IDA process (handlers cache in ``sys.modules`` for the
-    process lifetime, so a reused worker skips re-initialization)."""
+    """Register handlers against ``db``. Returns True on the first load in this
+    IDA process (handlers cache in ``sys.modules`` for the process lifetime, so
+    a reused worker skips re-initialization). Analysis readiness is the CLI's
+    job: it drains a worker's analysis and polls a GUI's settled barrier before
+    any command reaches here."""
     global _INITIALIZED
 
     from idb.worker.handlers import load_all
-    from idb.worker.dispatch import CTX
 
     first = not _INITIALIZED
     if first:
@@ -52,11 +37,6 @@ def _load(db) -> bool:
     from idb.worker import idahelp
 
     idahelp.declare_compact_types()
-    # Sticky: gate only the *initial* auto-analysis (a GUI still ingesting the
-    # binary). Later mutations queue incremental re-analysis and briefly clear
-    # auto_is_ok — that must not bounce handlers with NOT_READY.
-    if not CTX.ready:
-        CTX.ready = _analysis_ready()
     return first
 
 

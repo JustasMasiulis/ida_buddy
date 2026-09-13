@@ -104,7 +104,7 @@ def test_run_remote_uses_and_releases_one_database_handle(monkeypatch, capsys):
 
 def test_run_remote_never_waits_on_gui_analysis(monkeypatch, capsys):
     # A GUI instance belongs to the analyst: the CLI must not block on (and
-    # thereby force-enable) its auto-analysis; the remote dispatcher answers
+    # thereby force-enable) its auto-analysis; the client-side poll answers
     # NOT_READY instead.
     handle = FakeHandle(protocol.build_ok({"data": []}))
     monkeypatch.setattr(cli, "resolve_session", lambda ns: "/tmp/sample")

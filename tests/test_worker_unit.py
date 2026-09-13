@@ -25,7 +25,6 @@ def test_budget_none_never_trips():
 
 @pytest.fixture
 def handlers():
-    dispatch.CTX.ready = True
     saved = dict(dispatch.HANDLERS)
     yield
     dispatch.HANDLERS.clear()
@@ -65,15 +64,6 @@ def test_idb_error_and_internal_error(handlers):
 
     assert dispatch.invoke("missing")["error"]["code"] == protocol.NOT_FOUND
     assert dispatch.invoke("crash")["error"]["code"] == protocol.INTERNAL
-
-
-def test_not_ready(handlers, monkeypatch):
-    @dispatch.handler("query")
-    def query():
-        return {}
-
-    monkeypatch.setattr(dispatch.CTX, "ready", False)
-    assert dispatch.invoke("query")["error"]["code"] == protocol.NOT_READY
 
 
 def test_write_handler_tolerates_unavailable_undo_api(handlers):

@@ -10,7 +10,7 @@ import idautils
 import idc
 
 from idb.worker import idahelp
-from idb.worker.dispatch import handler, CTX
+from idb.worker.dispatch import handler
 
 _SUMMARY = {}
 
@@ -81,9 +81,9 @@ def warmup(prefetch_strings=True):
     _SUMMARY.update(_compute_summary())
 
 
-@handler("ping", always=True)
+@handler("ping")
 def ping():
-    return {"status": "ready" if CTX.ready else "analyzing"}
+    return {"status": "ready"}
 
 
 @handler("open_summary")

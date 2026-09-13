@@ -13,22 +13,13 @@ from idb.errors import IdbError
 HANDLERS = {}
 
 
-def handler(name, *, writes=False, always=False):
+def handler(name, *, writes=False):
     def decorate(function):
         function._writes = writes
-        function._always = always
         HANDLERS[name] = function
         return function
 
     return decorate
-
-
-class Context:
-    def __init__(self):
-        self.ready = False
-
-
-CTX = Context()
 
 
 def _create_undo_point(command):
@@ -42,8 +33,6 @@ def invoke(command, arguments=None):
     function = HANDLERS.get(command)
     if function is None:
         return protocol.build_error(protocol.UNKNOWN_CMD, f"unknown command: {command!r}")
-    if not CTX.ready and not function._always:
-        return protocol.build_error(protocol.NOT_READY, "database is still analyzing")
     arguments = arguments or {}
     if not isinstance(arguments, dict):
         return protocol.build_error(protocol.BAD_ARGS, "args is not a map")
