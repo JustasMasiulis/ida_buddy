@@ -121,7 +121,7 @@ def _from_rows(ea, tag):
 
 @handler("xrefs")
 def xrefs(addr, direction="to", offset=0, count=None):
-    ea = idahelp.resolve_target(addr)
+    ea = idahelp.resolve_mapped(addr)
     if direction == "to":
         gen = _to_rows(ea, False)
     elif direction == "from":

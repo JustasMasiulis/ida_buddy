@@ -311,6 +311,13 @@ def test_xrefs_one_row_per_site(client):
     pytest.skip("no referenced import in the first 50")
 
 
+def test_xrefs_rejects_unmapped_address(client):
+    # A mistyped address must fail loudly, not report "no references".
+    env = client.call("xrefs", {"addr": "0x140001a4d0"})
+    assert not protocol.is_ok(env)
+    assert env["error"]["code"] == protocol.BAD_ADDRESS
+
+
 def test_xrefs_both_tags_direction(client):
     result, _ = ok(client, "xrefs", {"addr": hex(_entry_ea(client)), "direction": "both"})
     assert isinstance(result["data"], list)
