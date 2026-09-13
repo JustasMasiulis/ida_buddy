@@ -71,16 +71,9 @@ def execute_code(command: str, arguments: dict[str, Any] | None = None) -> str:
     )
 
 
-def _entry_path(entry) -> str:
-    """Return a path that Nexus can use to resolve a discovered instance."""
-    if entry.exe_path and Path(entry.exe_path).exists():
-        return entry.exe_path
-    return entry.idb_path
-
-
 def list_databases() -> list[dict[str, Any]]:
     """Return Nexus discovery rows in the compact CLI formatter shape."""
-    from ida_nexus import discover_databases
+    from ida_nexus import discover_databases, reachable_path
 
     rows = []
     for discovered in discover_databases():
@@ -92,7 +85,7 @@ def list_databases() -> list[dict[str, Any]]:
                 "backend": entry.backend,
                 "pid": entry.pid,
                 "port": entry.port,
-                "input_path": _entry_path(entry),
+                "input_path": reachable_path(entry),
                 "idb_path": entry.idb_path,
                 "error": discovered.detail,
                 "_entry": entry,
