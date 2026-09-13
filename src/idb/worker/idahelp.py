@@ -209,6 +209,25 @@ def til():
     return ida_typeinf.get_idati()
 
 
+# Windows compact scalar names that agents write interchangeably with IDA's own
+# _BYTE/_WORD/_DWORD/_QWORD. Only a loaded Windows type library defines them
+# (QWORD is missing even from the ntddk tils), so a database without them gets
+# fixed-width local typedefs on load and every type parser accepts them as-is.
+_COMPACT_TYPEDEFS = {"BYTE": "unsigned __int8", "WORD": "unsigned __int16",
+                     "DWORD": "unsigned __int32", "QWORD": "unsigned __int64"}
+
+
+def declare_compact_types():
+    """Add whichever of BYTE/WORD/DWORD/QWORD the database does not define."""
+    import ida_typeinf
+
+    idati = til()
+    missing = [f"typedef {base} {name};" for name, base in _COMPACT_TYPEDEFS.items()
+               if not ida_typeinf.tinfo_t().get_named_type(idati, name)]
+    if missing:
+        ida_typeinf.parse_decls(idati, "\n".join(missing), None, ida_typeinf.PT_SIL)
+
+
 def disasm_at(ea):
     """Tag-free disassembly text at `ea`. IDA produces no line for an unmapped or
     BADADDR address and tag_remove rejects the resulting null, so degrade to a

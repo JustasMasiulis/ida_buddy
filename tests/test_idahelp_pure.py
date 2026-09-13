@@ -125,6 +125,31 @@ def test_parse_int_rejects_bad_arguments(bad, hex_default):
     assert ei.value.code == protocol.BAD_ARGS and "thing must be" in ei.value.message
 
 
+def test_declare_compact_types_adds_only_missing(monkeypatch):
+    import sys
+    import types as _types
+
+    defined = {"DWORD", "BYTE"}
+    declared = []
+
+    class Tinfo:
+        def get_named_type(self, til, name):
+            return name in defined
+
+    fake = _types.ModuleType("ida_typeinf")
+    fake.tinfo_t = Tinfo
+    fake.get_idati = lambda: "idati"
+    fake.PT_SIL = 1
+    fake.parse_decls = lambda til, text, cb, flags: declared.append(text) or 0
+    monkeypatch.setitem(sys.modules, "ida_typeinf", fake)
+
+    idahelp.declare_compact_types()
+    assert declared == ["typedef unsigned __int16 WORD;\ntypedef unsigned __int64 QWORD;"]
+    defined.update({"WORD", "QWORD"})
+    idahelp.declare_compact_types()
+    assert len(declared) == 1
+
+
 def test_safe_decompile_reports_hexrays_failure_reason(monkeypatch):
     import sys
     import types as _types

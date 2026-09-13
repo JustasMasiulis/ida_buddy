@@ -526,6 +526,20 @@ def test_da_du_fallback_to_memory_view(client):
         assert meta and "showing" in (meta.get("warning") or "")
 
 
+def test_compact_type_names_parse(client):
+    # BYTE/WORD/DWORD/QWORD are guaranteed to exist once the worker has loaded,
+    # whether a Windows type library defines them or the worker declared them.
+    ok(client, "declare", {"text": "struct IDB_COMPACT { QWORD a; DWORD b; WORD c; BYTE d; };"})
+    members = _members_by_off(client, "IDB_COMPACT")
+    assert members == {0: ("a", "QWORD"), 8: ("b", "DWORD"), 12: ("c", "WORD"), 14: ("d", "BYTE")}
+    ea = _mapped_data_ea(client)
+    applied = client.call("settype", {"target": hex(ea), "type": "QWORD"})
+    if not protocol.is_ok(applied):
+        pytest.skip(f"could not apply QWORD at {ea:#x}: {applied}")
+    result, _ = ok(client, "typeof", {"target": hex(ea)})
+    assert result["type"] == "QWORD"
+
+
 def _members_by_off(client, name):
     typ, _ = ok(client, "type", {"name": name})
     return {m["offset"]: (m["name"], m["type"]) for m in typ["members"]}

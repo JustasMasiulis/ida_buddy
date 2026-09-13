@@ -49,6 +49,9 @@ def _load(db) -> bool:
             pass
         _INITIALIZED = True
 
+    from idb.worker import idahelp
+
+    idahelp.declare_compact_types()
     # Sticky: gate only the *initial* auto-analysis (a GUI still ingesting the
     # binary). Later mutations queue incremental re-analysis and briefly clear
     # auto_is_ok — that must not bounce handlers with NOT_READY.
