@@ -42,7 +42,7 @@ def format_declare(result, ns=None):
     return "declared"
 
 
-def format_settype(result, ns=None):
+def format_retype(result, ns=None):
     where = f"{result['ea']:x}" if "ea" in result else result.get("target", "?")
     return f"set {where} to {result['type']}"
 

@@ -95,7 +95,7 @@ FORMATTERS = {
     "undo": fmt_writes.format_undo,
     "redo": fmt_writes.format_redo,
     "declare": fmt_writes.format_declare,
-    "settype": fmt_writes.format_settype,
+    "retype": fmt_writes.format_retype,
     "set_member": fmt_writes.format_set_member,
     "insert_member": fmt_writes.format_insert_member,
     "del_member": fmt_writes.format_del_member,
@@ -367,8 +367,8 @@ def build_parser():
              ex=('declare "struct Foo { int a; char b; };"', "declare @types.h"))
     sp.add_argument("decl", nargs="?", default=None)
     sp.add_argument("--file", default=None)
-    sp = cmd("settype", help="apply a type [mut]",
-             ex=("settype 0x140008000 GUID", "settype sub_401000:v3 int"))
+    sp = cmd("retype", help="apply a type [mut]",
+             ex=("retype 0x140008000 GUID", "retype sub_401000:v3 int"))
     sp.add_argument("target")
     sp.add_argument("type")
     sp = cmd("setlvar", help="rename and/or retype a Hex-Rays local in one step [mut]",
@@ -530,7 +530,7 @@ def build_request(ns):
         return c, {"addr": ns.addr, "fmt": ns.fmt, "opnum": ns.opnum}
     if c == "declare":
         return c, {"text": _read_decl(ns)}
-    if c == "settype":
+    if c == "retype":
         return c, {"target": ns.target, "type": ns.type}
     if c == "setlvar":
         return c, {"func": ns.func, "var": ns.var, "name": ns.name, "type": ns.type}

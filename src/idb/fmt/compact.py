@@ -2,7 +2,7 @@
 
 Both are pure `str -> str` and never touch IDA state or the RPC result dicts — they
 run on already-formatted text headed for the user, so the verbose spellings still
-round-trip through declare/settype/typeof on the way back in.
+round-trip through declare/retype/typeof on the way back in.
 
 `shorten` rewrites width-named/pseudo integer spellings to a single uppercase
 Windows-typedef style — BYTE/WORD/DWORD/QWORD (unsigned), CHAR/SHORT/INT/INT64

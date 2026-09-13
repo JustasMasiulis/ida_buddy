@@ -1,6 +1,6 @@
 """types read handlers: type, types, struct, member, typeof, frame.
 
-Type writes (declare/settype/set_member/insert_member/del_member/enum) and the
+Type writes (declare/retype/set_member/insert_member/del_member/enum) and the
 Hex-Rays union-arm selector (union-select) live here too.
 """
 
@@ -336,7 +336,7 @@ def declare(text):
     return {"ok": True, "declared": text.strip()}
 
 
-def _settype_local(func, var, new_type):
+def _retype_local(func, var, new_type):
     f = idahelp.require_func(func)
     import ida_hexrays
 
@@ -358,8 +358,8 @@ def _settype_local(func, var, new_type):
     raise IdbError(protocol.IDA_ERROR, f"could not set type of local {var!r} in {func!r}")
 
 
-@handler("settype", writes=True)
-def settype(target, type):
+@handler("retype", writes=True)
+def retype(target, type):
     new_type = _parse_type(type)
     try:
         ea = idahelp.resolve_target(target)
@@ -368,7 +368,7 @@ def settype(target, type):
     if ea is None:
         if ":" in target:
             func, _, var = target.partition(":")
-            return _settype_local(func, var, new_type)
+            return _retype_local(func, var, new_type)
         raise IdbError(protocol.NOT_FOUND, f"cannot resolve {target!r}")
     if not T.apply_tinfo(ea, new_type, T.TINFO_DEFINITE):
         raise IdbError(protocol.IDA_ERROR, f"apply_tinfo failed at {ea:#x}")

@@ -216,7 +216,7 @@ def test_write_formats():
     assert fmt_writes.format_patch({"ea": 0x401000, "count": 2, "bytes": b"\x90\x90"}) == "patched 2 bytes @ 401000: 9090"
     assert fmt_writes.format_enum({"name": "E", "members": [{"name": "A", "value": 1}]}) == "enum E: A=1"
     assert fmt_writes.format_undo({"undone": True, "label": "patch"}) == "undone: patch"
-    assert fmt_writes.format_settype({"ea": 0x401000, "type": "int *"}) == "set 401000 to int *"
+    assert fmt_writes.format_retype({"ea": 0x401000, "type": "int *"}) == "set 401000 to int *"
     us = {"ea": 0x401000, "union": "U", "member": "u1", "ordinal": 1, "verified": True}
     assert fmt_writes.format_union_select(us) == "union 401000: U -> .u1 (arm 1)"
     assert fmt_writes.format_union_select({**us, "verified": False}) == "union 401000: U -> .u1 (arm 1) (unverified)"
@@ -229,7 +229,7 @@ def test_comment_and_extend_formats():
     assert fmt_writes.format_comment(dis_only) == "comment 401000 (disasm): x"
     extended = {"name": "E", "extended": True, "members": [{"name": "C", "value": 9}]}
     assert fmt_writes.format_enum(extended) == "enum E extended: C=9"
-    assert fmt_writes.format_settype({"target": "f:v", "type": "char"}) == "set f:v to char"
+    assert fmt_writes.format_retype({"target": "f:v", "type": "char"}) == "set f:v to char"
 
 
 def test_write_labels_and_silent_confirmations():

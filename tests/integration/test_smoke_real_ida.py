@@ -499,7 +499,7 @@ def test_da_du_redirect_on_counted_string_type(client):
     if not protocol.is_ok(patched):
         pytest.skip(f"could not patch scratch bytes at {ea:#x}: {patched}")
     for type_name, wide, enc in (("IT_UNI_STRING", True, "utf16"), ("IT_ANSI_STRING", False, "ascii")):
-        applied = client.call("settype", {"target": hex(ea), "type": type_name})
+        applied = client.call("retype", {"target": hex(ea), "type": type_name})
         if not protocol.is_ok(applied):
             pytest.skip(f"could not apply {type_name} at {ea:#x}: {applied}")
         result, meta = ok(client, "string", {"addr": hex(ea), "encoding": enc})
@@ -515,7 +515,7 @@ def test_da_du_fallback_to_memory_view(client):
     # int type guarantee both the literal read and the *_STRING probe come up empty.
     ea = _mapped_data_ea(client)
     patched = client.call("patch", {"addr": hex(ea), "hex": "08 00 0a 00 00 00 00 00 00 00 00 00 00 00 00 00"})
-    typed = client.call("settype", {"target": hex(ea), "type": "int"})
+    typed = client.call("retype", {"target": hex(ea), "type": "int"})
     if not (protocol.is_ok(patched) and protocol.is_ok(typed)):
         pytest.skip(f"could not stage scratch bytes/type at {ea:#x}")
     for enc in ("ascii", "utf16"):
@@ -533,7 +533,7 @@ def test_compact_type_names_parse(client):
     members = _members_by_off(client, "IDB_COMPACT")
     assert members == {0: ("a", "QWORD"), 8: ("b", "DWORD"), 12: ("c", "WORD"), 14: ("d", "BYTE")}
     ea = _mapped_data_ea(client)
-    applied = client.call("settype", {"target": hex(ea), "type": "QWORD"})
+    applied = client.call("retype", {"target": hex(ea), "type": "QWORD"})
     if not protocol.is_ok(applied):
         pytest.skip(f"could not apply QWORD at {ea:#x}: {applied}")
     result, _ = ok(client, "typeof", {"target": hex(ea)})
@@ -809,7 +809,7 @@ def test_pseudocode_comment(client):
     assert anchored, "no statement address anchored a pseudocode comment"
 
 
-def test_settype_local_lvar(client):
+def test_retype_local_lvar(client):
     if not _has_hexrays(client):
         pytest.skip("no Hex-Rays")
     import re
@@ -830,7 +830,7 @@ def test_settype_local_lvar(client):
     if not chosen:
         pytest.skip("no function with a local variable found")
     target = f"{hex(chosen[0])}:{chosen[1]}"
-    ok(client, "settype", {"target": target, "type": "char"})
+    ok(client, "retype", {"target": target, "type": "char"})
     res, _ = ok(client, "typeof", {"target": target})
     assert "char" in res["type"]
 
@@ -949,11 +949,11 @@ def test_op_errors(client):
     assert not protocol.is_ok(no_enum) and no_enum["error"]["code"] == protocol.NOT_FOUND
 
 
-def test_settype_function_prototype(client):
+def test_retype_function_prototype(client):
     ea = _entry_ea(client)
     result, _ = ok(
         client,
-        "settype",
+        "retype",
         {"target": hex(ea), "type": "int __fastcall(int idb_argc_unique, char **idb_argv_unique)"},
     )
     assert result["ea"] == ea

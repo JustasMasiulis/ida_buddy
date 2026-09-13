@@ -62,7 +62,7 @@ Aliases in parens. `[mut]` mutates the database (creates an undo point).
 | `comment <addr> <text>` *(mut)* | set a comment (disassembly + decompiler) |
 | `op <addr> <hex\|dec\|oct\|bin\|char\|num\|enum:NAME> [opnum]` *(mut)* | set operand display format |
 | `declare ("<C>" \| --file P \| @P)` *(mut)* | create types |
-| `settype <target> <type>` / `setlvar <func> <var> [--name N] [--type T]` *(mut)* | apply types / rename and retype Hex-Rays locals |
+| `retype <target> <type>` / `setlvar <func> <var> [--name N] [--type T]` *(mut)* | apply types / rename and retype Hex-Rays locals |
 | `set_member <struct> <type> (--name N\|--at OFF\|--index I) [--rename NEW]` *(mut)* | retype/rename a member; a larger type absorbs the members it now overlaps |
 | `insert_member <struct> <type> <name> [--before N\|--after N\|--at OFF\|--index I]` *(mut)* | add a member (shifts following members down); appends if no anchor |
 | `del_member <struct> (--name N\|--at OFF\|--index I) [--leave-gap]` *(mut)* | remove a member, closing the gap (`--leave-gap` keeps offsets fixed) |
@@ -165,8 +165,8 @@ idb op 0x401234 dec
 idb op 0x401234 enum:MyFlags 1
 idb declare "struct Foo { int a; char b; };"
 idb declare @types.h
-idb settype 0x140008000 GUID
-idb settype sub_401000:v3 int
+idb retype 0x140008000 GUID
+idb retype sub_401000:v3 int
 idb setlvar main v0 --name count --type int
 idb set_member Foo int --name a --rename count
 idb insert_member Foo int count --after a
@@ -194,7 +194,7 @@ For `disas`, the target itself may be a symbol or address (`idb disas 0x401740 -
 Use `-o/--offset` only to resume paginated output after a `[+more]` notice.
 
 When decompiler output is dominated by scaffolding, improve known types first
-(`type`, `declare`, `settype`, `setlvar`) where possible. Then use `triage <func>`
+(`type`, `declare`, `retype`, `setlvar`) where possible. Then use `triage <func>`
 and focused `disas` windows to inspect only the code that still matters.
 
 ### Exit codes
