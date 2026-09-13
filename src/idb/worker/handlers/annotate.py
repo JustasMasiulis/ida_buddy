@@ -30,9 +30,12 @@ def rename(addr, name):
         func, _, var = addr.partition(":")
         f = idahelp.require_func(func)
         idahelp.require_hexrays("Hex-Rays is required to rename a local variable")
-        if not ida_hexrays.rename_lvar(f.start_ea, var, name):
-            raise IdbError(protocol.IDA_ERROR, f"could not rename local {var!r} (unknown name?)")
-        return {"target": addr, "name": name, "kind": "lvar"}
+        cfunc, lv = idahelp.hexrays_lvar(f.start_ea, var)
+        if lv is None:
+            raise IdbError(protocol.NOT_FOUND, f"no local variable {var!r} in {func!r}")
+        if not ida_hexrays.rename_lvar(f.start_ea, lv.name, name):
+            raise IdbError(protocol.IDA_ERROR, f"could not rename local {var!r} (name already in use?)")
+        return {"target": f"{func}:{name}", "name": name, "kind": "lvar"}, idahelp.stale_lvar_meta(var, lv)
     if ea is None:
         raise IdbError(protocol.NOT_FOUND, f"cannot resolve {addr!r}")
     if not ida_name.set_name(ea, name, ida_name.SN_NOWARN):

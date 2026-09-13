@@ -865,6 +865,43 @@ def test_setlvar_rename_and_retype(client):
     ok(client, "undo")
 
 
+def test_stale_default_lvar_name_resolves(client):
+    # After `v5` is renamed, an agent that still says `v5` reaches the same
+    # variable through setlvar, typeof and rename, with a warning naming it.
+    if not _has_hexrays(client):
+        pytest.skip("no Hex-Rays")
+    import re
+
+    funcs, _ = ok(client, "funcs", {"count": 40})
+    chosen = None
+    for f in funcs["data"]:
+        dec = client.call("decompile", {"func": hex(f["ea"])}, timeout_ms=60000)
+        if not protocol.is_ok(dec):
+            continue
+        for line in dec["result"]["lines"]:
+            m = re.match(r"\s+[\w ]+? (v[0-9]+);\s*//", line)
+            if m:
+                chosen = (f["ea"], m.group(1))
+                break
+        if chosen:
+            break
+    if not chosen:
+        pytest.skip("no function with a default-named local found")
+    func_hex, stale = hex(chosen[0]), chosen[1]
+    assert not protocol.is_ok(client.call("setlvar", {"func": func_hex, "var": "v999", "type": "char"}))
+    ok(client, "rename", {"addr": f"{func_hex}:{stale}", "name": "idb_stale"})
+    try:
+        res, meta = ok(client, "setlvar", {"func": func_hex, "var": stale, "type": "char"})
+        assert res["name"] == "idb_stale" and meta["warning"] == f"{stale!r} is now named 'idb_stale'"
+        res, meta = ok(client, "typeof", {"target": f"{func_hex}:{stale}"})
+        assert res["target"] == f"{func_hex}:idb_stale" and "char" in res["type"] and meta["warning"]
+        res, meta = ok(client, "rename", {"addr": f"{func_hex}:{stale}", "name": "idb_stale2"})
+        assert res["name"] == "idb_stale2" and meta["warning"]
+    finally:
+        for _ in range(3):
+            ok(client, "undo")
+
+
 # --- `op` operand-representation tests run LAST on the shared worker: applying an
 # operand format forces a re-decompile of the touched function, which can destabilize
 # Hex-Rays lvar-name persistence for the local-variable tests above. The op change

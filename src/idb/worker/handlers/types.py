@@ -250,19 +250,11 @@ def member(type, offset, page_offset=0, count=None):
 
 def _typeof_lvar(func, var):
     f = idahelp.require_func(func)
-    import ida_hexrays
-
-    if ida_hexrays.init_hexrays_plugin():
-        ida_hexrays.mark_cfunc_dirty(f.start_ea)
-        try:
-            cfunc = ida_hexrays.decompile(f.start_ea)
-            for lv in cfunc.get_lvars():
-                if lv.name == var:
-                    lt = lv.type()
-                    return {"target": f"{func}:{var}", "kind": "lvar",
-                            "type": str(lt), "size": lt.get_size()}
-        except ida_hexrays.DecompilationFailure:
-            pass
+    cfunc, lv = idahelp.hexrays_lvar(f.start_ea, var)
+    if lv is not None:
+        lt = lv.type()
+        return ({"target": f"{func}:{lv.name}", "kind": "lvar", "type": str(lt), "size": lt.get_size()},
+                idahelp.stale_lvar_meta(var, lv))
     ftif = T.tinfo_t()
     if ftif.get_func_frame(f):
         idx = ftif.find_udm(var)
@@ -344,42 +336,18 @@ def declare(text):
     return {"ok": True, "declared": text.strip()}
 
 
-def _hexrays_lvar(func_start, var):
-    """Decompile func_start and locate the lvar named var. Returns (cfunc, lvar);
-    the caller MUST keep cfunc referenced while using lvar (the lvar is owned by it).
-    Either element is None when Hex-Rays is unavailable, decompilation fails, or no
-    such lvar exists."""
-    import ida_hexrays
-
-    if not ida_hexrays.init_hexrays_plugin():
-        return None, None
-    # Decompile fresh: a cached cfunc can carry a stale lvar list/types after a
-    # referenced struct or callee prototype changed, and this lvar is about to
-    # be edited or reported.
-    ida_hexrays.mark_cfunc_dirty(func_start)
-    try:
-        cfunc = ida_hexrays.decompile(func_start)
-    except ida_hexrays.DecompilationFailure:
-        return None, None
-    if cfunc is None:
-        return None, None
-    for lv in cfunc.get_lvars():
-        if lv.name == var:
-            return cfunc, lv
-    return cfunc, None
-
-
 def _settype_local(func, var, new_type):
     f = idahelp.require_func(func)
     import ida_hexrays
 
-    cfunc, lv = _hexrays_lvar(f.start_ea, var)
+    cfunc, lv = idahelp.hexrays_lvar(f.start_ea, var)
     if lv is not None:
         lsi = ida_hexrays.lvar_saved_info_t()
         lsi.ll = lv
         lsi.type = new_type
         if ida_hexrays.modify_user_lvar_info(f.start_ea, ida_hexrays.MLI_TYPE, lsi):
-            return {"target": f"{func}:{var}", "kind": "lvar", "type": str(new_type)}
+            return ({"target": f"{func}:{lv.name}", "kind": "lvar", "type": str(new_type)},
+                    idahelp.stale_lvar_meta(var, lv))
     ftif = T.tinfo_t()
     if ftif.get_func_frame(f):
         idx = ftif.find_udm(var)
@@ -417,9 +385,11 @@ def setlvar(func, var, name=None, type=None):
         raise IdbError(protocol.BAD_ARGS, "setlvar needs --name and/or --type")
     f = idahelp.require_func(func)
     idahelp.require_hexrays("Hex-Rays is required for setlvar")
-    cfunc, lv = _hexrays_lvar(f.start_ea, var)
+    cfunc, lv = idahelp.hexrays_lvar(f.start_ea, var)
     if lv is None:
         raise IdbError(protocol.NOT_FOUND, f"no local variable {var!r} in {func!r}")
+    meta = idahelp.stale_lvar_meta(var, lv)
+    var = lv.name
 
     type_str = str(lv.type())
     if type:
@@ -437,7 +407,7 @@ def setlvar(func, var, name=None, type=None):
             raise IdbError(protocol.IDA_ERROR,
                            f"could not rename {var!r} -> {name!r} (name already in use?)")
         final_name = name
-    return {"target": f"{func}:{final_name}", "kind": "lvar", "name": final_name, "type": type_str}
+    return {"target": f"{func}:{final_name}", "kind": "lvar", "name": final_name, "type": type_str}, meta
 
 
 def _selector_label(name, at, index):

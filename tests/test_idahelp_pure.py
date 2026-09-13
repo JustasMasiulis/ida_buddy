@@ -150,6 +150,58 @@ def test_declare_compact_types_adds_only_missing(monkeypatch):
     assert len(declared) == 1
 
 
+class _Lvar:
+    def __init__(self, name, is_arg, loc):
+        self.name, self.is_arg_var, self.defea, self.location = name, is_arg, 0x1000, loc
+
+
+def _install_fake_hexrays(monkeypatch, lvars, saved_names):
+    import sys
+    import types as _types
+
+    class UserVec:
+        lvvec = []
+
+    def restore(uv, ea):
+        uv.lvvec = [_types.SimpleNamespace(name=name, ll=lv)
+                    for lv, name in zip(lvars, saved_names) if name]
+
+    fake = _types.ModuleType("ida_hexrays")
+    fake.init_hexrays_plugin = lambda: True
+    fake.mark_cfunc_dirty = lambda ea: None
+    fake.DecompilationFailure = type("DecompilationFailure", (Exception,), {})
+    fake.decompile = lambda ea: _types.SimpleNamespace(get_lvars=lambda: lvars)
+    fake.lvar_uservec_t = UserVec
+    fake.restore_user_lvar_settings = restore
+    monkeypatch.setitem(sys.modules, "ida_hexrays", fake)
+
+
+def test_hexrays_lvar_resolves_stale_default_names(monkeypatch):
+    # Slot layout as Hex-Rays builds it: arguments first, slot i shown as v<i>,
+    # the k-th argument as a<k>; slot 4 is an unused, never-shown local and the
+    # user renamed slots 1 and 5.
+    lvars = [_Lvar("a1", True, 0), _Lvar("idb_arg", True, 1), _Lvar("v2", False, 2),
+             _Lvar("v3", False, 3), _Lvar("", False, 4), _Lvar("count", False, 5),
+             _Lvar("v6", False, 6)]
+    _install_fake_hexrays(monkeypatch, lvars, [None, "idb_arg", None, None, None, "count", None])
+
+    def lookup(var):
+        _, lv = idahelp.hexrays_lvar(0x401000, var)
+        return lv.name if lv is not None else None
+
+    assert lookup("count") == "count"  # a live name always wins
+    assert lookup("v5") == "count"  # stale default name -> the renamed slot
+    assert lookup("a2") == "idb_arg"
+    assert lookup("v6") == "v6"
+    assert lookup("v4") is None  # unused slot was never shown nor renamed
+    assert lookup("v1") is None  # slot 1 is an argument, so it was never a v-name
+    assert lookup("a3") is None  # only two arguments
+    assert lookup("v99") is None
+    assert lookup("x") is None
+    assert idahelp.stale_lvar_meta("v5", lvars[5]) == {"warning": "'v5' is now named 'count'"}
+    assert idahelp.stale_lvar_meta("count", lvars[5]) is None
+
+
 def test_safe_decompile_reports_hexrays_failure_reason(monkeypatch):
     import sys
     import types as _types

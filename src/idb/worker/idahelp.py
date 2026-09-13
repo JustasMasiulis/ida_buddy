@@ -293,6 +293,61 @@ def require_hexrays(msg):
         raise IdbError(protocol.IDA_ERROR, msg)
 
 
+_DEFAULT_LVAR = re.compile(r"([av])([0-9]+)")
+
+
+def hexrays_lvar(func_start, var):
+    """Decompile `func_start` and locate the local variable `var`. Returns
+    (cfunc, lvar); the caller MUST keep cfunc referenced while using lvar (the
+    lvar is owned by it). Either element is None when Hex-Rays is unavailable,
+    decompilation fails, or no such lvar exists.
+
+    A default name that no longer exists (`v8` after that variable was renamed)
+    still resolves: Hex-Rays names slot i of the lvar list `v<i>` and the k-th
+    argument `a<k>`, and a rename leaves every other slot's name and index
+    alone, so the slot is found by position and accepted only if the user
+    renamed it (it carries a name in the saved lvar settings)."""
+    import ida_hexrays
+
+    if not ida_hexrays.init_hexrays_plugin():
+        return None, None
+    # Decompile fresh: a cached cfunc can carry a stale lvar list/types after a
+    # referenced struct or callee prototype changed, and this lvar is about to
+    # be edited or reported.
+    ida_hexrays.mark_cfunc_dirty(func_start)
+    try:
+        cfunc = ida_hexrays.decompile(func_start)
+    except ida_hexrays.DecompilationFailure:
+        return None, None
+    if cfunc is None:
+        return None, None
+    lvars = cfunc.get_lvars()
+    for lv in lvars:
+        if lv.name == var:
+            return cfunc, lv
+    m = _DEFAULT_LVAR.fullmatch(var)
+    if not m:
+        return cfunc, None
+    n = int(m.group(2))
+    if m.group(1) == "v":
+        lv = lvars[n] if n < len(lvars) and not lvars[n].is_arg_var else None
+    else:
+        args = [lv for lv in lvars if lv.is_arg_var]
+        lv = args[n - 1] if 0 < n <= len(args) else None
+    if lv is None:
+        return cfunc, None
+    saved = ida_hexrays.lvar_uservec_t()
+    ida_hexrays.restore_user_lvar_settings(saved, func_start)
+    renamed = any(s.name and s.ll.defea == lv.defea and s.ll.location == lv.location
+                  for s in saved.lvvec)
+    return cfunc, (lv if renamed else None)
+
+
+def stale_lvar_meta(var, lv):
+    """Envelope meta warning when `var` resolved through its old default name."""
+    return {"warning": f"{var!r} is now named {lv.name!r}"} if lv.name != var else None
+
+
 def safe_decompile(ea):
     """Decompile `ea` fresh (the cache is not invalidated on callee/struct retype),
     raising IDA_ERROR on failure or a null result. Use only at sites whose policy
