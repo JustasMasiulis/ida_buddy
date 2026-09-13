@@ -27,7 +27,7 @@ uv run idb doctor
 hcli plugin install ida-nexus
 ```
 
-For a packaged install, install `ida-nexus>=0.7.0` and `ida-buddy` in the same environment so the managed Nexus worker is available.
+For a packaged install, install `ida-nexus>=0.11.0` and `ida-buddy` in the same environment so the managed Nexus worker is available.
 
 ## Commands
 
