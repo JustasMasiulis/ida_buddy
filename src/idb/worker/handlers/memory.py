@@ -6,6 +6,7 @@ import ida_ida
 import ida_name
 import ida_nalt
 import ida_typeinf
+import idautils
 from ida_idaapi import BADADDR
 
 from idb import protocol
@@ -175,7 +176,14 @@ def pointers(addr, count=None, offset=0):
             break
         value = int(getter(cur))
         sym, off = _symbolize(value) if ida_bytes.is_mapped(value) else (None, 0)
-        rows.append({"ea": cur, "value": value, "sym": sym, "off": off})
+        # The cell's own symbol: adjacent tables read as one long table unless
+        # each row says which named item it belongs to.
+        label, label_off = _symbolize(cur)
+        # References to the cell itself: a referenced cell is a table start
+        # or a slot code reads directly, named or not.
+        xrefs = sum(1 for _ in idautils.XrefsTo(cur))
+        rows.append({"ea": cur, "value": value, "sym": sym, "off": off,
+                     "label": label, "label_off": label_off, "xrefs": xrefs})
         cur += width
     return {"addr": ea, "width": width, "data": rows, "count": len(rows),
             "be": ida_ida.inf_is_be()}

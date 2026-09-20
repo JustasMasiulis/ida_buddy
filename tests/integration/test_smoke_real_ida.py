@@ -160,6 +160,23 @@ def test_pointers_dump(client):
     assert result["data"] and all("ea" in r and "value" in r for r in result["data"])
 
 
+def test_pointers_label_each_cell_with_its_own_symbol(client):
+    # Import slots are adjacent named items: every row must carry its own
+    # __imp_ name, and a row inside a named item carries the head plus offset.
+    imports, _ = ok(client, "imports", {"count": 2})
+    if len(imports["data"]) < 2:
+        pytest.skip("binary has fewer than two imports")
+    ea = imports["data"][0]["ea"]
+    result, _ = ok(client, "pointers", {"addr": hex(ea), "count": 2})
+    rows = result["data"]
+    assert rows[0]["label"] == f"__imp_{imports['data'][0]['name']}" and rows[0]["label_off"] == 0
+    assert rows[1]["label"] and rows[1]["label"] != rows[0]["label"]
+    xrefs, _ = ok(client, "xrefs", {"addr": hex(ea), "count": 1000})
+    assert rows[0]["xrefs"] == len(xrefs["data"]) >= 1
+    result, _ = ok(client, "pointers", {"addr": hex(ea + 1), "count": 1})
+    assert result["data"][0]["label"] == rows[0]["label"] and result["data"][0]["label_off"] == 1
+
+
 def test_string_struct_runs(client):
     # The entry bytes are not a real counted string; this only asserts the handler
     # executes its IDA calls and returns a well-formed envelope.

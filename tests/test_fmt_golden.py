@@ -266,6 +266,25 @@ def test_pointers_format():
     assert fmt_memory.format_pointers({"addr": 0x1000, "width": 8, "data": []}) == "(no pointers)"
 
 
+def test_pointers_format_cell_labels():
+    # Two back-to-back vtables plus a page that starts inside an item: the cell
+    # column names each item once and continues it with "| +off".
+    out = fmt_memory.format_pointers({"addr": 0x1008, "width": 8, "data": [
+        {"ea": 0x1008, "value": 0x140001350, "sym": "Foo::AddRef", "off": 0, "label": "Foo_vtbl", "label_off": 8},
+        {"ea": 0x1010, "value": 0x5, "sym": None, "off": 0, "label": "Foo_vtbl", "label_off": 0x10},
+        {"ea": 0x1018, "value": 0x140001400, "sym": "Bar::Release", "off": 0, "label": "Bar_vtbl", "label_off": 0, "xrefs": 3},
+        {"ea": 0x1020, "value": 0x140001450, "sym": "Bar::AddRef", "off": 0, "label": "Bar_vtbl", "label_off": 8, "xrefs": 0},
+        {"ea": 0x1028, "value": 0x0, "sym": None, "off": 0, "label": None, "label_off": 0, "xrefs": 1},
+    ]})
+    assert out.splitlines() == [
+        "1008  0000000140001350  Foo::AddRef  | Foo_vtbl+8",
+        "1010  0000000000000005  | +10",
+        "1018  0000000140001400  Bar::Release  | Bar_vtbl  (3 xrefs)",
+        "1020  0000000140001450  Bar::AddRef  | +8",
+        "1028  0000000000000000  (1 xref)",
+    ]
+
+
 def test_string_struct_format():
     wide = {"addr": 0x2000, "wide": True, "length": 8, "maxlen": 10, "buffer": 0x3000, "text": "kernel32"}
     assert fmt_memory.format_string_struct(wide) == '2000  UNICODE_STRING len=8 max=10 buf=3000  "kernel32"'

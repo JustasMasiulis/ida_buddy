@@ -65,11 +65,22 @@ def format_pointers(result, ns=None):
         return "(no pointers)"
     w = result["width"] * 2
     aw = max(len(f"{r['ea']:x}") for r in rows)
-    out = []
+    out, prev_label = [], None
     for r in rows:
         line = f"{r['ea']:0{aw}x}  {r['value']:0{w}x}"
         if r.get("sym"):
             line += f"  {r['sym']}" + (f"+{r['off']:x}" if r.get("off") else "")
+        # Cell column: "| name" opens a named item, "| +off" continues the one
+        # named above; a page starting mid-item spells the name once.
+        label, label_off = r.get("label"), r.get("label_off") or 0
+        if label and label == prev_label:
+            line += f"  | +{label_off:x}"
+        elif label:
+            line += f"  | {label}" + (f"+{label_off:x}" if label_off else "")
+        prev_label = label
+        n = r.get("xrefs") or 0
+        if n:
+            line += f"  ({n} xref{'s' if n != 1 else ''})"
         out.append(line)
     return "\n".join(out)
 
