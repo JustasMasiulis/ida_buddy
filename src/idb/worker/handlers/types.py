@@ -403,9 +403,7 @@ def setlvar(func, var, name=None, type=None):
 
     final_name = var
     if name and name != var:
-        if not ida_hexrays.rename_lvar(f.start_ea, var, name):
-            raise IdbError(protocol.IDA_ERROR,
-                           f"could not rename {var!r} -> {name!r} (name already in use?)")
+        idahelp.rename_lvar(f.start_ea, cfunc, lv, name)
         final_name = name
     return {"target": f"{func}:{final_name}", "kind": "lvar", "name": final_name, "type": type_str}, meta
 

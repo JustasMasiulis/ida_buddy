@@ -270,6 +270,50 @@ def require_mapped(ea):
     return ea
 
 
+def set_global_name(ea, name):
+    """Name `ea` (`set_name` with SN_NOWARN) or raise the precise reason it
+    cannot be: set_name only returns a bool, and guessing "name in use" has sent
+    agents off to avoid the address form of `rename` when the address they took
+    from a listing was a tail byte or the name was held elsewhere."""
+    import ida_bytes
+    import ida_idaapi
+    import ida_name
+
+    require_mapped(ea)
+    head = ida_bytes.get_item_head(ea)
+    if head != ea:
+        raise IdbError(protocol.BAD_ADDRESS,
+                       f"{ea:#x} is inside the item at {head:#x}; rename {head:#x} instead")
+    valid = ida_name.validate_name(name, ida_name.VNT_IDENT)
+    if valid != name:
+        hint = f" (IDA would accept {valid!r})" if valid else ""
+        raise IdbError(protocol.BAD_ARGS, f"invalid name {name!r}{hint}")
+    holder = ida_name.get_name_ea(ida_idaapi.BADADDR, name)
+    if holder not in (ida_idaapi.BADADDR, ea):
+        raise IdbError(protocol.IDA_ERROR, f"name {name!r} is already used at {holder:#x}")
+    if not ida_name.set_name(ea, name, ida_name.SN_NOWARN):
+        raise IdbError(protocol.IDA_ERROR, f"set_name failed at {ea:#x}")
+
+
+def rename_lvar(func_start, cfunc, lv, name):
+    """Rename the Hex-Rays local `lv` of `cfunc` or raise the precise reason:
+    another local already carries `name`, the name is not an identifier, or
+    rename_lvar refused for a reason it does not report."""
+    import ida_hexrays
+    import ida_name
+
+    if name == lv.name:
+        return
+    if any(o.name == name for o in cfunc.get_lvars()):
+        raise IdbError(protocol.IDA_ERROR, f"local {name!r} already exists in this function")
+    valid = ida_name.validate_name(name, ida_name.VNT_IDENT)
+    if valid != name:
+        hint = f" (IDA would accept {valid!r})" if valid else ""
+        raise IdbError(protocol.BAD_ARGS, f"invalid name {name!r}{hint}")
+    if not ida_hexrays.rename_lvar(func_start, lv.name, name):
+        raise IdbError(protocol.IDA_ERROR, f"could not rename local {lv.name!r} -> {name!r}")
+
+
 def resolve_mapped(addr, offset=0, width=1):
     """Resolve `addr` (+ offset*width) to a mapped ea or raise BAD_ADDRESS."""
     return require_mapped(resolve_target(addr) + (offset or 0) * width)

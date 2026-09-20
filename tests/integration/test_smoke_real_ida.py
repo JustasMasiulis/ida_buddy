@@ -260,6 +260,38 @@ def test_resolve_dummy_name_after_rename(client):
         ok(client, "undo")
 
 
+def test_rename_reports_the_real_failure(client):
+    # set_name only says no; the handler must say why, or agents conclude the
+    # address form is broken and avoid it.
+    ea = _entry_ea(client)
+    ok(client, "rename", {"addr": hex(ea), "name": "idb_rename_holder"})
+    try:
+        lines, _ = ok(client, "disas", {"target": hex(ea), "count": 2})
+        second = lines["lines"][1]
+        assert second["size"] > 1
+        tail = second["ea"] + 1
+        reply = client.call("rename", {"addr": hex(tail), "name": "idb_tail"})
+        assert reply["error"]["code"] == protocol.BAD_ADDRESS, reply
+        assert f"{second['ea']:#x}" in reply["error"]["message"]
+
+        reply = client.call("rename", {"addr": "0x10", "name": "idb_unmapped"})
+        assert reply["error"]["code"] == protocol.BAD_ADDRESS, reply
+        assert "not mapped" in reply["error"]["message"]
+
+        reply = client.call("rename", {"addr": hex(second["ea"]), "name": "idb_rename_holder"})
+        assert reply["error"]["code"] == protocol.IDA_ERROR, reply
+        assert f"{ea:#x}" in reply["error"]["message"]
+
+        reply = client.call("rename", {"addr": hex(ea), "name": "bad name"})
+        assert reply["error"]["code"] == protocol.BAD_ARGS, reply
+        assert "'bad_name'" in reply["error"]["message"]
+
+        result, _ = ok(client, "rename", {"addr": hex(ea), "name": "idb_rename_holder"})  # same name, same ea
+        assert result["name"] == "idb_rename_holder"
+    finally:
+        ok(client, "undo")
+
+
 def _two_named_addresses(client):
     imports, _ = ok(client, "imports", {"count": 2})
     if len(imports["data"]) < 2:
@@ -869,6 +901,35 @@ def test_setlvar_rename_and_retype(client):
     assert "int" in res["type"]
     readback, _ = ok(client, "typeof", {"target": f"{func_hex}:idb_lv"})
     assert "int" in readback["type"]
+    ok(client, "undo")
+
+
+def test_lvar_rename_reports_the_real_failure(client):
+    if not _has_hexrays(client):
+        pytest.skip("no Hex-Rays")
+    import re
+
+    chosen = None
+    funcs, _ = ok(client, "funcs", {"count": 40})
+    for f in funcs["data"]:
+        dec = client.call("decompile", {"func": hex(f["ea"])}, timeout_ms=60000)
+        if not protocol.is_ok(dec):
+            continue
+        names = re.findall(r"^\s+[\w ]+?\b([A-Za-z_]\w*);\s*//", "\n".join(dec["result"]["lines"]), re.M)
+        if len(names) >= 2:
+            chosen = (f["ea"], names[0], names[1])
+            break
+    if not chosen:
+        pytest.skip("no function with two local variables found")
+    func_hex, a, b = hex(chosen[0]), chosen[1], chosen[2]
+    reply = client.call("rename", {"addr": f"{func_hex}:{a}", "name": b})
+    assert reply["error"]["code"] == protocol.IDA_ERROR, reply
+    assert f"local {b!r} already exists" in reply["error"]["message"]
+    reply = client.call("setlvar", {"func": func_hex, "var": a, "name": "bad name"})
+    assert reply["error"]["code"] == protocol.BAD_ARGS, reply
+    assert "'bad_name'" in reply["error"]["message"]
+    result, _ = ok(client, "setlvar", {"func": func_hex, "var": a, "name": a, "type": "int"})  # same name is a no-op
+    assert result["name"] == a
     ok(client, "undo")
 
 

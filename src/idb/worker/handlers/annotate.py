@@ -33,13 +33,11 @@ def rename(addr, name):
         cfunc, lv = idahelp.hexrays_lvar(f.start_ea, var)
         if lv is None:
             raise IdbError(protocol.NOT_FOUND, f"no local variable {var!r} in {func!r}")
-        if not ida_hexrays.rename_lvar(f.start_ea, lv.name, name):
-            raise IdbError(protocol.IDA_ERROR, f"could not rename local {var!r} (name already in use?)")
+        idahelp.rename_lvar(f.start_ea, cfunc, lv, name)
         return {"target": f"{func}:{name}", "name": name, "kind": "lvar"}, idahelp.stale_lvar_meta(var, lv)
     if ea is None:
         raise IdbError(protocol.NOT_FOUND, f"cannot resolve {addr!r}")
-    if not ida_name.set_name(ea, name, ida_name.SN_NOWARN):
-        raise IdbError(protocol.IDA_ERROR, f"set_name failed at {ea:#x} (name already in use?)")
+    idahelp.set_global_name(ea, name)
     return {"ea": ea, "name": ida_name.get_name(ea), "kind": "name"}
 
 
