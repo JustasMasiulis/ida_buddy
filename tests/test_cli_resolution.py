@@ -420,6 +420,43 @@ def test_close_refuses_gui_instances(monkeypatch):
     assert error.value.code == protocol.BAD_ARGS
 
 
+@pytest.mark.parametrize("argv, fresh", [
+    (["--idb", "{path}", "-t", "600", "open"], False),
+    (["open", "--idb", "{path}", "-t", "600"], False),
+    (["open", "{path}", "-t", "600", "--fresh"], True),
+    (["--idb", "{path}", "open", "{path}", "-t", "600"], False),
+])
+def test_open_accepts_path_via_positional_or_idb(monkeypatch, tmp_path, argv, fresh):
+    binary = tmp_path / "seeded.exe"
+    binary.write_bytes(b"MZ")
+    calls = []
+
+    def fake_session(target, *, timeout, fresh):
+        calls.append((target, timeout, fresh))
+        raise IdbError(protocol.BAD_ARGS, "stop after resolution")
+
+    monkeypatch.setattr(cli.nexus, "session", fake_session)
+
+    cli.main([arg.format(path=binary) for arg in argv])
+
+    assert calls == [(str(binary.resolve()), 600.0, fresh)]
+
+
+@pytest.mark.parametrize("argv, message", [
+    (["open"], "open needs a path"),
+    (["--idb", "{a}", "open", "{b}"], "pass the path once"),
+])
+def test_open_rejects_missing_or_conflicting_paths(monkeypatch, tmp_path, capsys, argv, message):
+    paths = {name: tmp_path / f"{name}.exe" for name in ("a", "b")}
+    for path in paths.values():
+        path.write_bytes(b"MZ")
+    monkeypatch.setattr(cli.nexus, "session", lambda *a, **kw: pytest.fail("must not open"))
+
+    assert cli.main([arg.format(**paths) for arg in argv]) != 0
+
+    assert message in capsys.readouterr().out
+
+
 def test_emit_prints_warning_before_data_on_stdout(capsys):
     result = {"addr": 0x2000, "wide": False, "length": 3, "maxlen": 4,
               "buffer": 0x3000, "text": "abc", "redirected_to_struct": True}

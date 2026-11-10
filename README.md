@@ -33,7 +33,7 @@ Aliases in parens. `[mut]` mutates the database (creates an undo point).
 
 | Command | Meaning |
 |---|---|
-| `open [--fresh] <path>` | attach to a registered GUI, or spawn a managed worker, then print summary |
+| `open [--fresh] <path>` | attach to a registered GUI, or spawn a managed worker, then print summary; `--idb <path> open` is equivalent |
 | `sessions` | list registered Nexus databases |
 | `close [record-id] [--all] [--no-save]` | shut down a managed worker; `--no-save` discards unsaved changes |
 | `save` / `doctor` | persist the selected database / diagnose setup |

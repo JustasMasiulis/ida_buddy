@@ -239,8 +239,9 @@ def build_parser():
         return sp
 
     sp = cmd("open", help="attach to a registered GUI or managed worker database",
-             ex=(r"open C:\bins\foo.exe", "open foo.exe --fresh"))
-    sp.add_argument("target")
+             ex=(r"open C:\bins\foo.exe", r"--idb C:\bins\foo.exe open", "open foo.exe --fresh"))
+    sp.add_argument("target", nargs="?", default=None,
+                    help="database/binary path (same as --idb)")
     sp.add_argument("--fresh", action="store_true",
                     help="create a new IDB from the input (refuses a live owner)")
 
@@ -610,9 +611,22 @@ def run_remote(ns, rpc_cmd, rpc_args):
     return emit(rpc_cmd, reply, ns)
 
 
+def _open_target(ns):
+    if ns.target is None and ns.idb is None:
+        raise IdbError(protocol.BAD_ARGS, "open needs a path: `idb open <path>` or `idb --idb <path> open`")
+    if ns.target is None:
+        return nexus.validate_path(ns.idb)
+
+    target = nexus.validate_path(ns.target)
+    if ns.idb is not None and nexus.validate_path(ns.idb) != target:
+        raise IdbError(protocol.BAD_ARGS,
+                       f"open got --idb {ns.idb!r} and positional {ns.target!r}; pass the path once")
+    return target
+
+
 def cmd_open(ns):
     timeout = ns.timeout if ns.timeout else nexus.OPEN_TIMEOUT
-    target = nexus.validate_path(ns.target)
+    target = _open_target(ns)
     with nexus.session(target, timeout=timeout, fresh=ns.fresh) as handle:
         gui = handle.instance.backend == "gui"
         execution = handle.execute_python(
